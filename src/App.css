@@ -239,6 +239,14 @@
   background: var(--surface-muted);
 }
 
+.compact-card {
+  padding: 18px 20px;
+}
+
+.spacious-card {
+  padding: 22px;
+}
+
 .hero-list div,
 .step-list div {
   display: grid;
@@ -289,6 +297,73 @@
 .detail-item {
   display: grid;
   gap: 4px;
+}
+
+.mini-summary,
+.mini-row,
+.mini-row-meta,
+.editor-stack,
+.editor-card {
+  display: grid;
+  gap: 12px;
+}
+
+.mini-summary {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+}
+
+.mini-summary strong {
+  font-size: 1.4rem;
+}
+
+.editor-stack {
+  gap: 16px;
+}
+
+.editor-card {
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.dense-list {
+  gap: 10px;
+}
+
+.mini-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  padding: 14px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.mini-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.mini-row:last-child {
+  padding-bottom: 0;
+}
+
+.mini-row > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.mini-row-meta {
+  justify-items: end;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.muted-inline {
+  color: var(--text-muted);
+  font-weight: 600;
 }
 
 .detail-item span,
@@ -404,6 +479,18 @@
   color: var(--danger);
 }
 
+.file-picker {
+  position: relative;
+  overflow: hidden;
+}
+
+.file-picker input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .full-width {
   width: 100%;
 }
@@ -481,6 +568,7 @@ textarea:focus {
   .split-grid,
   .stats-grid,
   .detail-grid,
+  .mini-row,
   .input-grid {
     grid-template-columns: 1fr;
   }

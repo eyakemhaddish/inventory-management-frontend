@@ -15,6 +15,14 @@ import {
   useNavigate,
 } from 'react-router-dom'
 import { createApiClient } from './api'
+import {
+  CompanyDashboardPage,
+  InventoryPage,
+  ProductsPage,
+  ReportsPage,
+  SalesPage,
+  TransfersPage,
+} from './companyOperations'
 import './App.css'
 
 const SESSION_STORAGE_KEY = 'ims.session'
@@ -162,7 +170,57 @@ function App() {
               session?.user.isSuperAdmin ? (
                 <Navigate to="/app/platform/companies" replace />
               ) : (
-                <CompanyOverviewPage api={api} session={session} />
+                <CompanyDashboardPage api={api} session={session} />
+              )
+            }
+          />
+          <Route
+            path="company/products"
+            element={
+              session?.user.isSuperAdmin ? (
+                <Navigate to="/app/platform/companies" replace />
+              ) : (
+                <ProductsPage api={api} />
+              )
+            }
+          />
+          <Route
+            path="company/inventory"
+            element={
+              session?.user.isSuperAdmin ? (
+                <Navigate to="/app/platform/companies" replace />
+              ) : (
+                <InventoryPage api={api} />
+              )
+            }
+          />
+          <Route
+            path="company/transfers"
+            element={
+              session?.user.isSuperAdmin ? (
+                <Navigate to="/app/platform/companies" replace />
+              ) : (
+                <TransfersPage api={api} />
+              )
+            }
+          />
+          <Route
+            path="company/sales"
+            element={
+              session?.user.isSuperAdmin ? (
+                <Navigate to="/app/platform/companies" replace />
+              ) : (
+                <SalesPage api={api} />
+              )
+            }
+          />
+          <Route
+            path="company/reports"
+            element={
+              session?.user.isSuperAdmin ? (
+                <Navigate to="/app/platform/companies" replace />
+              ) : (
+                <ReportsPage api={api} />
               )
             }
           />
@@ -545,6 +603,11 @@ function AppLayout({ clearSession, session }) {
     ? [{ to: '/app/platform/companies', label: 'Companies' }]
     : [
         { to: '/app/company/overview', label: 'Overview' },
+        { to: '/app/company/products', label: 'Products' },
+        { to: '/app/company/inventory', label: 'Inventory' },
+        { to: '/app/company/transfers', label: 'Transfers' },
+        { to: '/app/company/sales', label: 'Sales' },
+        { to: '/app/company/reports', label: 'Reports' },
         { to: '/app/company/branches', label: 'Branches' },
         { to: '/app/company/roles', label: 'Roles' },
         { to: '/app/company/users', label: 'Users' },
@@ -757,100 +820,6 @@ function PlatformCompaniesPage({ api }) {
           ))}
         </section>
       )}
-    </div>
-  )
-}
-
-function CompanyOverviewPage({ api, session }) {
-  const [summary, setSummary] = useState({
-    branches: 0,
-    roles: 0,
-    users: 0,
-  })
-  const [loading, setLoading] = useState(true)
-  const [message, setMessage] = useState('')
-
-  const loadSummary = useCallback(async () => {
-    setLoading(true)
-    setMessage('')
-
-    try {
-      const [branchResult, roleResult, userResult] = await Promise.all([
-        api.get('/branches'),
-        api.get('/admin/roles'),
-        api.get('/admin/users'),
-      ])
-
-      setSummary({
-        branches: branchResult.length,
-        roles: roleResult.length,
-        users: userResult.length,
-      })
-    } catch (error) {
-      setMessage(error.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [api])
-
-  useEffect(() => {
-    void loadSummary()
-  }, [loadSummary])
-
-  return (
-    <div className="page-stack">
-      <PageHeader
-        eyebrow="Company admin"
-        title="Overview"
-        description="A simple summary of your current company setup."
-      />
-
-      {message ? <InlineMessage text={message} tone="error" /> : null}
-
-      <section className="stats-grid">
-        <StatCard label="Company" value={session.user.companyName} note={session.user.companyStatus} />
-        <StatCard label="Branches" value={loading ? '...' : summary.branches} note="Configured locations" />
-        <StatCard label="Roles" value={loading ? '...' : summary.roles} note="Access templates" />
-        <StatCard label="Users" value={loading ? '...' : summary.users} note="Team members" />
-      </section>
-
-      <section className="split-grid">
-        <article className="content-card">
-          <p className="eyebrow">Suggested setup order</p>
-          <div className="step-list">
-            <div>
-              <strong>1. Create branches</strong>
-              <p>Start by defining the operating locations users can be assigned to.</p>
-            </div>
-            <div>
-              <strong>2. Build roles</strong>
-              <p>Create role templates and attach the exact permissions each job needs.</p>
-            </div>
-            <div>
-              <strong>3. Add users</strong>
-              <p>Create staff accounts, assign a role, then assign one or more branches.</p>
-            </div>
-          </div>
-        </article>
-
-        <article className="content-card">
-          <p className="eyebrow">Quick links</p>
-          <div className="quick-links">
-            <NavLink to="/app/company/branches" className="quick-link-card">
-              <strong>Manage branches</strong>
-              <span>Create and view branch locations</span>
-            </NavLink>
-            <NavLink to="/app/company/roles" className="quick-link-card">
-              <strong>Manage roles</strong>
-              <span>Create roles and edit permissions</span>
-            </NavLink>
-            <NavLink to="/app/company/users" className="quick-link-card">
-              <strong>Manage users</strong>
-              <span>Add users and assign roles or branches</span>
-            </NavLink>
-          </div>
-        </article>
-      </section>
     </div>
   )
 }
