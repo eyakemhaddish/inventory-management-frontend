@@ -28,6 +28,168 @@ import './App.css'
 const SESSION_STORAGE_KEY = 'ims.session'
 const REGISTRATION_STORAGE_KEY = 'ims.companyRegistration'
 const SUBDOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])$/
+const DEFAULT_ROLE_TEMPLATES = [
+  {
+    key: 'sales',
+    title: 'Sales',
+    accent: 'sales',
+    description: 'Fast checkout, returns, and just enough inventory visibility for front-line sales teams.',
+    permissionNames: [
+      'sale.create',
+      'sale.return',
+      'sale.view_own',
+      'product.view',
+      'stock.view',
+    ],
+  },
+  {
+    key: 'branch-manager',
+    title: 'Branch Manager',
+    accent: 'manager',
+    description: 'A balanced starting point for branch operations, people assignment, and performance reporting.',
+    permissionNames: [
+      'branch.view',
+      'branch.create',
+      'branch.edit',
+      'product.view',
+      'sale.create',
+      'sale.return',
+      'sale.view_all',
+      'stock.view',
+      'stock.transfer',
+      'stock.transfer_receive',
+      'user.create',
+      'user.edit',
+      'user.assign_role',
+      'report.view_sales',
+      'report.view_inventory',
+    ],
+  },
+  {
+    key: 'stock-manager',
+    title: 'Stock Manager',
+    accent: 'stock',
+    description: 'Built for product readiness, stock movement, receiving, audits, and inventory reporting.',
+    permissionNames: [
+      'product.view',
+      'product.create',
+      'product.edit',
+      'product.import',
+      'product.export',
+      'stock.view',
+      'stock.adjust',
+      'stock.transfer',
+      'stock.transfer_approve',
+      'stock.transfer_receive',
+      'stock.audit_view',
+      'report.view_inventory',
+    ],
+  },
+]
+
+function createLocalId(prefix) {
+  if (globalThis.crypto?.randomUUID) {
+    return `${prefix}-${globalThis.crypto.randomUUID()}`
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function formatRoleText(value) {
+  return value.replace(/[-_]/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+function buildPermissionGroups(permissions) {
+  const groups = permissions.reduce((collection, permission) => {
+    const existing = collection[permission.resource] ?? []
+    existing.push(permission)
+    collection[permission.resource] = existing
+    return collection
+  }, {})
+
+  return Object.entries(groups)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([resource, resourcePermissions]) => ({
+      resource,
+      label: formatRoleText(resource),
+      permissions: [...resourcePermissions].sort((left, right) =>
+        left.action.localeCompare(right.action),
+      ),
+    }))
+}
+
+function buildRoleCoverage(permissionIds, permissionLookupById) {
+  const coverage = permissionIds.reduce((collection, permissionId) => {
+    const permission = permissionLookupById[permissionId]
+    if (!permission) {
+      return collection
+    }
+
+    collection[permission.resource] = (collection[permission.resource] ?? 0) + 1
+    return collection
+  }, {})
+
+  return Object.entries(coverage)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([resource, count]) => ({
+      resource,
+      label: formatRoleText(resource),
+      count,
+    }))
+}
+
+function buildRoleComposerDraft({ template, permissionLookupByName }) {
+  const permissionIds = template
+    ? template.permissionNames
+        .map((permissionName) => permissionLookupByName[permissionName]?.id)
+        .filter(Boolean)
+    : []
+
+  return {
+    id: createLocalId('role'),
+    accent: template?.accent ?? 'custom',
+    templateKey: template?.key ?? null,
+    templateTitle: template?.title ?? 'Custom role',
+    description:
+      template?.description ??
+      'Build a role from scratch, set the name, and select the permissions your team actually needs.',
+    name: template?.title ?? '',
+    permissionIds,
+  }
+}
+
+function createExistingRoleDraft(role) {
+  return {
+    name: role.name,
+    permissionIds: role.permissions.map((permission) => permission.id),
+  }
+}
+
+function setGroupSelection(permissionIds, groupPermissionIds, shouldSelect) {
+  const nextSelection = new Set(permissionIds)
+
+  groupPermissionIds.forEach((permissionId) => {
+    if (shouldSelect) {
+      nextSelection.add(permissionId)
+      return
+    }
+
+    nextSelection.delete(permissionId)
+  })
+
+  return [...nextSelection]
+}
+
+function hasSameSelections(left, right) {
+  const leftSelection = new Set(left)
+  const rightSelection = new Set(right)
+
+  if (leftSelection.size !== rightSelection.size) {
+    return false
+  }
+
+  return [...leftSelection].every((permissionId) => rightSelection.has(permissionId))
+}
 
 function readStorage(key) {
   const value = window.localStorage.getItem(key)
@@ -210,7 +372,7 @@ function App() {
               session?.user.isSuperAdmin ? (
                 <Navigate to="/app/platform/companies" replace />
               ) : (
-                <SalesPage api={api} />
+                <SalesPage api={api} session={session} />
               )
             }
           />
@@ -935,14 +1097,16 @@ function RolesPage({ api }) {
   const [permissions, setPermissions] = useState([])
   const [roles, setRoles] = useState([])
   const [roleDrafts, setRoleDrafts] = useState({})
-  const [form, setForm] = useState({ name: '', permissionIds: [] })
+  const [newRoleDrafts, setNewRoleDrafts] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
-  const [message, setMessage] = useState('')
+  const [feedback, setFeedback] = useState(null)
+  const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
+  const [activeRoleId, setActiveRoleId] = useState('')
 
   const loadRolesPage = useCallback(async () => {
     setLoading(true)
-    setMessage('')
 
     try {
       const [permissionResult, roleResult] = await Promise.all([
@@ -950,15 +1114,15 @@ function RolesPage({ api }) {
         api.get('/admin/roles'),
       ])
 
-      setPermissions(permissionResult)
-      setRoles(roleResult)
-      setRoleDrafts(
-        Object.fromEntries(
-          roleResult.map((role) => [role.id, role.permissions.map((permission) => permission.id)]),
-        ),
-      )
+      startTransition(() => {
+        setPermissions(permissionResult)
+        setRoles(roleResult)
+        setRoleDrafts(
+          Object.fromEntries(roleResult.map((role) => [role.id, createExistingRoleDraft(role)])),
+        )
+      })
     } catch (error) {
-      setMessage(error.message)
+      setFeedback({ tone: 'error', text: error.message })
     } finally {
       setLoading(false)
     }
@@ -968,154 +1132,659 @@ function RolesPage({ api }) {
     void loadRolesPage()
   }, [loadRolesPage])
 
-  async function createRole(event) {
-    event.preventDefault()
-    setBusy('create')
-    setMessage('')
+  useEffect(() => {
+    if (roles.length === 0) {
+      setActiveRoleId('')
+      return
+    }
+
+    setActiveRoleId((current) =>
+      roles.some((role) => role.id === current) ? current : roles[0].id,
+    )
+  }, [roles])
+
+  const permissionLookupById = permissions.reduce((lookup, permission) => {
+    lookup[permission.id] = permission
+    return lookup
+  }, {})
+
+  const permissionLookupByName = permissions.reduce((lookup, permission) => {
+    lookup[permission.name] = permission
+    return lookup
+  }, {})
+
+  const permissionGroups = buildPermissionGroups(permissions)
+  const selectedTemplateKeys = new Set(
+    newRoleDrafts.map((draft) => draft.templateKey).filter(Boolean),
+  )
+  const totalAssignedPermissions = roles.reduce(
+    (total, role) => total + role.permissions.length,
+    0,
+  )
+  const filteredRoles = roles.filter((role) => {
+    const query = deferredSearch.trim().toLowerCase()
+    if (!query) {
+      return true
+    }
+
+    const searchableText = `${role.name} ${role.permissions
+      .map((permission) => `${permission.name} ${permission.resource} ${permission.action}`)
+      .join(' ')}`.toLowerCase()
+
+    return searchableText.includes(query)
+  })
+  const selectedRole =
+    filteredRoles.find((role) => role.id === activeRoleId) ?? filteredRoles[0] ?? null
+  const selectedRoleDraft = selectedRole ? roleDrafts[selectedRole.id] : null
+
+  function addBlankRole() {
+    setNewRoleDrafts((current) => [
+      ...current,
+      buildRoleComposerDraft({ template: null, permissionLookupByName }),
+    ])
+  }
+
+  function addTemplateRole(template) {
+    setNewRoleDrafts((current) => {
+      if (current.some((draft) => draft.templateKey === template.key)) {
+        return current
+      }
+
+      return [
+        ...current,
+        buildRoleComposerDraft({
+          template,
+          permissionLookupByName,
+        }),
+      ]
+    })
+  }
+
+  function updateNewRoleDraft(draftId, updater) {
+    setNewRoleDrafts((current) =>
+      current.map((draft) => (draft.id === draftId ? updater(draft) : draft)),
+    )
+  }
+
+  function removeNewRoleDraft(draftId) {
+    setNewRoleDrafts((current) => current.filter((draft) => draft.id !== draftId))
+  }
+
+  function updateExistingRoleDraft(roleId, updater) {
+    setRoleDrafts((current) => ({
+      ...current,
+      [roleId]: updater(current[roleId] ?? { name: '', permissionIds: [] }),
+    }))
+  }
+
+  async function createRole(draftId) {
+    const draft = newRoleDrafts.find((item) => item.id === draftId)
+    const name = draft?.name.trim() ?? ''
+    if (!draft || !name) {
+      setFeedback({ tone: 'error', text: 'Role name is required before saving.' })
+      return
+    }
+
+    setBusy(`create:${draftId}`)
+    setFeedback(null)
 
     try {
-      await api.post('/admin/roles', form)
-      setForm({ name: '', permissionIds: [] })
+      await api.post('/admin/roles', {
+        name,
+        permissionIds: draft.permissionIds,
+      })
+      setNewRoleDrafts((current) => current.filter((item) => item.id !== draftId))
       await loadRolesPage()
+      setFeedback({ tone: 'success', text: `${name} role created.` })
     } catch (error) {
-      setMessage(error.message)
+      setFeedback({ tone: 'error', text: error.message })
     } finally {
       setBusy('')
     }
   }
 
   async function updateRole(roleId) {
-    setBusy(roleId)
-    setMessage('')
+    const draft = roleDrafts[roleId]
+    const name = draft?.name.trim() ?? ''
+    if (!draft || !name) {
+      setFeedback({ tone: 'error', text: 'Role name is required before saving.' })
+      return
+    }
+
+    setBusy(`update:${roleId}`)
+    setFeedback(null)
 
     try {
       await api.put(`/admin/roles/${roleId}`, {
-        permissionIds: roleDrafts[roleId] ?? [],
+        name,
+        permissionIds: draft.permissionIds,
       })
       await loadRolesPage()
+      setFeedback({ tone: 'success', text: `${name} role updated.` })
     } catch (error) {
-      setMessage(error.message)
+      setFeedback({ tone: 'error', text: error.message })
     } finally {
       setBusy('')
     }
   }
 
-  const permissionsByResource = permissions.reduce((groups, permission) => {
-    const existing = groups[permission.resource] ?? []
-    existing.push(permission)
-    groups[permission.resource] = existing
-    return groups
-  }, {})
+  function roleHasChanges(role) {
+    const draft = roleDrafts[role.id]
+    if (!draft) {
+      return false
+    }
+
+    return (
+      draft.name.trim() !== role.name ||
+      !hasSameSelections(
+        draft.permissionIds,
+        role.permissions.map((permission) => permission.id),
+      )
+    )
+  }
 
   return (
-    <div className="page-stack">
+    <div className="page-stack roles-page">
       <PageHeader
         eyebrow="Company admin"
-        title="Roles and permissions"
-        description="Create role templates and update permission sets on a separate page."
+        title="Role studio"
+        description="Pick a starter role, tailor the name and permissions, then save a polished access setup for your company."
+        action={
+          <button type="button" className="primary-button" onClick={addBlankRole}>
+            Add blank role
+          </button>
+        }
       />
 
-      {message ? <InlineMessage text={message} tone="error" /> : null}
+      {feedback ? <InlineMessage text={feedback.text} tone={feedback.tone} /> : null}
 
-      <section className="content-card">
-        <div className="section-heading">
-          <h3>Create role</h3>
-          <p>Build a new role from the available permission groups.</p>
-        </div>
-
-        <form className="stack-form" onSubmit={createRole}>
-          <FormField label="Role name">
-            <input
-              required
-              value={form.name}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, name: event.target.value }))
-              }
-            />
-          </FormField>
-
-          <div className="permission-groups">
-            {Object.entries(permissionsByResource).map(([resource, resourcePermissions]) => (
-              <section key={resource} className="permission-group">
-                <h4>{resource}</h4>
-                <div className="pill-grid">
-                  {resourcePermissions.map((permission) => (
-                    <label key={permission.id} className="toggle-pill">
-                      <input
-                        type="checkbox"
-                        checked={form.permissionIds.includes(permission.id)}
-                        onChange={() =>
-                          setForm((current) => ({
-                            ...current,
-                            permissionIds: toggleSelection(current.permissionIds, permission.id),
-                          }))
-                        }
-                      />
-                      <span>{permission.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </section>
-            ))}
+      <section className="role-showcase">
+        <article className="role-showcase-hero">
+          <p className="eyebrow">Starter workflow</p>
+          <h2>Launch team roles in minutes instead of building every permission set by hand.</h2>
+          <p>
+            Choose from Sales, Branch Manager, and Stock Manager, rename anything you want,
+            fine-tune the permissions, or create a completely custom role from scratch.
+          </p>
+          <div className="role-chip-row">
+            <span className="role-chip">Editable names</span>
+            <span className="role-chip">Pre-selected permissions</span>
+            <span className="role-chip">Manual custom roles</span>
           </div>
+        </article>
 
-          <button className="primary-button" disabled={busy === 'create'} type="submit">
-            {busy === 'create' ? 'Creating...' : 'Create role'}
-          </button>
-        </form>
+        <div className="role-stats-panel">
+          <div className="role-mini-stat">
+            <span>Saved roles</span>
+            <strong>{loading ? '...' : roles.length}</strong>
+          </div>
+          <div className="role-mini-stat">
+            <span>Available permissions</span>
+            <strong>{loading ? '...' : permissions.length}</strong>
+          </div>
+          <div className="role-mini-stat">
+            <span>Role coverage</span>
+            <strong>{loading ? '...' : totalAssignedPermissions}</strong>
+          </div>
+        </div>
       </section>
 
-      <section className="content-card">
+      <section className="content-card role-template-section">
         <div className="section-heading">
-          <h3>Existing roles</h3>
-          <p>{loading ? 'Loading roles...' : `${roles.length} roles available`}</p>
+          <h3>Default role starters</h3>
+          <p>
+            Select the default roles you want to use, then edit the role name and permissions
+            before saving.
+          </p>
+        </div>
+
+        <div className="role-template-grid">
+          {DEFAULT_ROLE_TEMPLATES.map((template) => (
+            <RoleTemplateCard
+              key={template.key}
+              template={template}
+              permissionLookupById={permissionLookupById}
+              permissionLookupByName={permissionLookupByName}
+              loading={loading}
+              disabled={loading || permissions.length === 0}
+              selected={selectedTemplateKeys.has(template.key)}
+              onSelect={() => addTemplateRole(template)}
+            />
+          ))}
+          <article className="role-template-card custom">
+            <div className="role-template-card-top">
+              <span className="role-template-mark custom">+</span>
+              <span className="status-pill subtle">Build manually</span>
+            </div>
+            <div className="role-template-copy">
+              <h4>Custom role</h4>
+              <p>
+                Start with a blank role if you need something outside the three default role
+                starters.
+              </p>
+            </div>
+            <div className="role-chip-row">
+              <span className="role-chip muted">No pre-selected permissions</span>
+            </div>
+            <button type="button" className="ghost-button" onClick={addBlankRole}>
+              Create blank role
+            </button>
+          </article>
+        </div>
+      </section>
+
+      <section className="content-card role-builder-shell">
+        <div className="section-heading">
+          <h3>Role setup studio</h3>
+          <p>
+            Review each draft role, edit the name, and adjust permissions before you save it to
+            the company.
+          </p>
+        </div>
+
+        {newRoleDrafts.length === 0 ? (
+          <section className="role-empty-state">
+            <strong>No draft roles yet</strong>
+            <p>Select one of the default roles above or start with a blank role.</p>
+            <button type="button" className="ghost-button" onClick={addBlankRole}>
+              Add blank role
+            </button>
+          </section>
+        ) : (
+          <div className="role-editor-list">
+            {newRoleDrafts.map((draft, index) => (
+              <article key={draft.id} className={`role-editor-card role-editor-card-${draft.accent}`}>
+                <div className="role-editor-head">
+                  <div className="role-editor-copy">
+                    <span className={`role-badge role-badge-${draft.accent}`}>
+                      {draft.templateKey ? `${draft.templateTitle} starter` : `Custom role ${index + 1}`}
+                    </span>
+                    <h3>{draft.name.trim() || 'Untitled role'}</h3>
+                    <p>{draft.description}</p>
+                  </div>
+
+                  <div className="role-card-actions">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      disabled={busy === `create:${draft.id}`}
+                      onClick={() => removeNewRoleDraft(draft.id)}
+                    >
+                      Discard
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={busy === `create:${draft.id}`}
+                      onClick={() => createRole(draft.id)}
+                    >
+                      {busy === `create:${draft.id}` ? 'Creating...' : 'Create role'}
+                    </button>
+                  </div>
+                </div>
+
+                <FormField
+                  label="Role name"
+                  hint="This name can be edited before the role is saved."
+                >
+                  <input
+                    required
+                    placeholder="e.g. Downtown Sales Team"
+                    value={draft.name}
+                    onChange={(event) =>
+                      updateNewRoleDraft(draft.id, (current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                  />
+                </FormField>
+
+                <div className="role-metric-grid">
+                  <div className="role-metric-card">
+                    <span>Selected permissions</span>
+                    <strong>{draft.permissionIds.length}</strong>
+                  </div>
+                  <div className="role-metric-card">
+                    <span>Resource groups</span>
+                    <strong>{buildRoleCoverage(draft.permissionIds, permissionLookupById).length}</strong>
+                  </div>
+                  <div className="role-metric-card role-metric-card-wide">
+                    <span>Coverage</span>
+                    <div className="role-chip-row">
+                      <RoleCoverageBadges
+                        permissionIds={draft.permissionIds}
+                        permissionLookupById={permissionLookupById}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <RolePermissionGroups
+                  permissionGroups={permissionGroups}
+                  selectedPermissionIds={draft.permissionIds}
+                  onTogglePermission={(permissionId) =>
+                    updateNewRoleDraft(draft.id, (current) => ({
+                      ...current,
+                      permissionIds: toggleSelection(current.permissionIds, permissionId),
+                    }))
+                  }
+                  onSetGroupSelection={(groupPermissionIds, shouldSelect) =>
+                    updateNewRoleDraft(draft.id, (current) => ({
+                      ...current,
+                      permissionIds: setGroupSelection(
+                        current.permissionIds,
+                        groupPermissionIds,
+                        shouldSelect,
+                      ),
+                    }))
+                  }
+                />
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="content-card role-library-shell">
+        <div className="role-library-toolbar">
+          <div className="section-heading">
+            <h3>Existing roles</h3>
+            <p>{loading ? 'Loading roles...' : `${roles.length} roles saved for this company`}</p>
+          </div>
+
+          <FormField label="Search roles" hint="Filter by role name or permission name.">
+            <input
+              placeholder="Find a role"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </FormField>
         </div>
 
         {loading ? (
           <EmptyCard text="Loading roles..." compact />
         ) : roles.length === 0 ? (
           <EmptyCard text="No roles created yet." compact />
+        ) : filteredRoles.length === 0 ? (
+          <EmptyCard text="No roles match your search yet." compact />
         ) : (
-          <div className="stack-list">
-            {roles.map((role) => (
-              <article key={role.id} className="list-card spacious-card">
-                <div className="list-card-header">
-                  <div>
-                    <strong>{role.name}</strong>
-                    <span>{(roleDrafts[role.id] ?? []).length} permissions selected</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    disabled={busy === role.id}
-                    onClick={() => updateRole(role.id)}
-                  >
-                    {busy === role.id ? 'Saving...' : 'Save role'}
-                  </button>
-                </div>
+          <div className="role-library-grid">
+            {filteredRoles.map((role) => {
+              const draft = roleDrafts[role.id] ?? createExistingRoleDraft(role)
+              const dirty = roleHasChanges(role)
 
-                <div className="pill-grid">
-                  {permissions.map((permission) => (
-                    <label key={`${role.id}-${permission.id}`} className="toggle-pill">
-                      <input
-                        type="checkbox"
-                        checked={(roleDrafts[role.id] ?? []).includes(permission.id)}
-                        onChange={() =>
-                          setRoleDrafts((current) => ({
-                            ...current,
-                            [role.id]: toggleSelection(current[role.id] ?? [], permission.id),
-                          }))
-                        }
-                      />
-                      <span>{permission.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </article>
-            ))}
+              return (
+                <button
+                  key={role.id}
+                  type="button"
+                  className={
+                    selectedRole?.id === role.id
+                      ? 'role-library-card active'
+                      : 'role-library-card'
+                  }
+                  onClick={() => setActiveRoleId(role.id)}
+                >
+                  <div className="role-library-card-top">
+                    <span className={dirty ? 'role-library-state dirty' : 'role-library-state'}>
+                      {dirty ? 'Unsaved' : 'Saved'}
+                    </span>
+                    <span>{draft.permissionIds.length} permissions</span>
+                  </div>
+                  <strong>{draft.name.trim() || 'Untitled role'}</strong>
+                  <div className="role-chip-row">
+                    <RoleCoverageBadges
+                      permissionIds={draft.permissionIds}
+                      permissionLookupById={permissionLookupById}
+                      limit={3}
+                    />
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
+
+        {selectedRole && selectedRoleDraft ? (
+          <article className="role-editor-card role-editor-card-existing">
+            <div className="role-editor-head">
+              <div className="role-editor-copy">
+                <span className="role-badge role-badge-existing">Existing role</span>
+                <h3>{selectedRoleDraft.name.trim() || selectedRole.name}</h3>
+                <p>Edit the role name and permissions together, then save the updated role.</p>
+              </div>
+
+              <div className="role-card-actions">
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={
+                    busy === `update:${selectedRole.id}` || !roleHasChanges(selectedRole)
+                  }
+                  onClick={() => updateRole(selectedRole.id)}
+                >
+                  {busy === `update:${selectedRole.id}` ? 'Saving...' : 'Save changes'}
+                </button>
+              </div>
+            </div>
+
+            <FormField
+              label="Role name"
+              hint="Renaming a role is saved together with its permission changes."
+            >
+              <input
+                required
+                value={selectedRoleDraft.name}
+                onChange={(event) =>
+                  updateExistingRoleDraft(selectedRole.id, (current) => ({
+                    ...current,
+                    name: event.target.value,
+                  }))
+                }
+              />
+            </FormField>
+
+            <div className="role-metric-grid">
+              <div className="role-metric-card">
+                <span>Selected permissions</span>
+                <strong>{selectedRoleDraft.permissionIds.length}</strong>
+              </div>
+              <div className="role-metric-card">
+                <span>Resource groups</span>
+                <strong>
+                  {buildRoleCoverage(selectedRoleDraft.permissionIds, permissionLookupById).length}
+                </strong>
+              </div>
+              <div className="role-metric-card role-metric-card-wide">
+                <span>Coverage</span>
+                <div className="role-chip-row">
+                  <RoleCoverageBadges
+                    permissionIds={selectedRoleDraft.permissionIds}
+                    permissionLookupById={permissionLookupById}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <RolePermissionGroups
+              permissionGroups={permissionGroups}
+              selectedPermissionIds={selectedRoleDraft.permissionIds}
+              onTogglePermission={(permissionId) =>
+                updateExistingRoleDraft(selectedRole.id, (current) => ({
+                  ...current,
+                  permissionIds: toggleSelection(current.permissionIds, permissionId),
+                }))
+              }
+              onSetGroupSelection={(groupPermissionIds, shouldSelect) =>
+                updateExistingRoleDraft(selectedRole.id, (current) => ({
+                  ...current,
+                  permissionIds: setGroupSelection(
+                    current.permissionIds,
+                    groupPermissionIds,
+                    shouldSelect,
+                  ),
+                }))
+              }
+            />
+          </article>
+        ) : null}
       </section>
+    </div>
+  )
+}
+
+function RoleTemplateCard({
+  disabled,
+  loading,
+  template,
+  permissionLookupById,
+  permissionLookupByName,
+  selected,
+  onSelect,
+}) {
+  const permissionIds = template.permissionNames
+    .map((permissionName) => permissionLookupByName[permissionName]?.id)
+    .filter(Boolean)
+
+  return (
+    <article className={`role-template-card ${template.accent}`}>
+      <div className="role-template-card-top">
+        <span className={`role-template-mark ${template.accent}`}>
+          {template.title
+            .split(' ')
+            .map((word) => word[0])
+            .join('')
+            .slice(0, 2)}
+        </span>
+        <span className="status-pill subtle">{permissionIds.length} permissions</span>
+      </div>
+
+      <div className="role-template-copy">
+        <h4>{template.title}</h4>
+        <p>{template.description}</p>
+      </div>
+
+      <div className="role-chip-row">
+        <RoleCoverageBadges
+          permissionIds={permissionIds}
+          permissionLookupById={permissionLookupById}
+        />
+      </div>
+
+      <button
+        type="button"
+        className="ghost-button"
+        disabled={disabled || selected}
+        onClick={onSelect}
+      >
+        {loading
+          ? 'Loading...'
+          : permissionIds.length === 0
+            ? 'No permissions available'
+            : selected
+              ? 'Selected'
+              : 'Use template'}
+      </button>
+    </article>
+  )
+}
+
+function RoleCoverageBadges({
+  permissionIds,
+  permissionLookupById,
+  emptyText = 'No permissions yet',
+  limit = 4,
+}) {
+  const coverage = buildRoleCoverage(permissionIds, permissionLookupById)
+
+  if (coverage.length === 0) {
+    return <span className="role-chip muted">{emptyText}</span>
+  }
+
+  const visibleCoverage = coverage.slice(0, limit)
+
+  return (
+    <>
+      {visibleCoverage.map((item) => (
+        <span key={item.resource} className="role-chip">
+          {item.label} {item.count}
+        </span>
+      ))}
+      {coverage.length > limit ? (
+        <span className="role-chip muted">+{coverage.length - limit} more</span>
+      ) : null}
+    </>
+  )
+}
+
+function RolePermissionGroups({
+  permissionGroups,
+  selectedPermissionIds,
+  onTogglePermission,
+  onSetGroupSelection,
+}) {
+  return (
+    <div className="role-permission-groups">
+      {permissionGroups.map((group) => {
+        const groupPermissionIds = group.permissions.map((permission) => permission.id)
+        const selectedCount = groupPermissionIds.filter((permissionId) =>
+          selectedPermissionIds.includes(permissionId),
+        ).length
+
+        return (
+          <section key={group.resource} className="role-permission-group">
+            <div className="role-permission-group-header">
+              <div>
+                <h4>{group.label}</h4>
+                <p>
+                  {selectedCount} of {group.permissions.length} selected
+                </p>
+              </div>
+
+              <div className="role-group-actions">
+                <button
+                  type="button"
+                  className="ghost-button role-mini-button"
+                  onClick={() => onSetGroupSelection(groupPermissionIds, true)}
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button role-mini-button"
+                  disabled={selectedCount === 0}
+                  onClick={() => onSetGroupSelection(groupPermissionIds, false)}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="role-permission-grid">
+              {group.permissions.map((permission) => {
+                const checked = selectedPermissionIds.includes(permission.id)
+
+                return (
+                  <label
+                    key={permission.id}
+                    className={checked ? 'role-toggle-card selected' : 'role-toggle-card'}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => onTogglePermission(permission.id)}
+                    />
+                    <span className="role-toggle-copy">
+                      <strong>{formatRoleText(permission.action)}</strong>
+                      <small>{permission.name}</small>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -1419,7 +2088,14 @@ function FormField({ children, hint, label }) {
 }
 
 function InlineMessage({ text, tone }) {
-  return <p className={tone === 'error' ? 'inline-message error' : 'inline-message'}>{text}</p>
+  const className =
+    tone === 'error'
+      ? 'inline-message error'
+      : tone === 'success'
+        ? 'inline-message success'
+        : 'inline-message'
+
+  return <p className={className}>{text}</p>
 }
 
 function EmptyCard({ compact = false, text }) {

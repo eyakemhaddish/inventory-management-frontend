@@ -1056,7 +1056,7 @@ export function TransfersPage({ api }) {
   )
 }
 
-export function SalesPage({ api }) {
+export function SalesPage({ api, session }) {
   const [branches, setBranches] = useState([])
   const [products, setProducts] = useState([])
   const [sales, setSales] = useState([])
@@ -1079,6 +1079,16 @@ export function SalesPage({ api }) {
     reason: '',
   })
 
+  const normalizedRoleName = session?.user?.roleName?.trim().toLowerCase() ?? ''
+  const isCompanyAdmin =
+    normalizedRoleName === 'admin' || normalizedRoleName === 'company admin'
+  const assignedBranchIds = session?.user?.branchIds ?? []
+  const hasAssignedBranchIds = assignedBranchIds.length > 0
+  const selectableBranches = isCompanyAdmin
+    ? branches
+    : hasAssignedBranchIds
+      ? branches.filter((branch) => assignedBranchIds.includes(branch.id))
+      : branches
   const variants = normalizeProductVariants(products)
   const selectedSale = sales.find((sale) => sale.id === returnForm.saleId)
 
@@ -1087,17 +1097,28 @@ export function SalesPage({ api }) {
 
     try {
       const [branchResult, productResult] = await Promise.all([
-        api.get('/branches'),
+        api.get('/branches/assigned'),
         api.get('/products?pageSize=100'),
       ])
 
       setBranches(branchResult)
       setProducts(productResult.items ?? [])
-      setSelectedBranchId(branchResult[0]?.id ?? '')
+
+      const nextSelectableBranches = isCompanyAdmin
+        ? branchResult
+        : hasAssignedBranchIds
+          ? branchResult.filter((branch) => assignedBranchIds.includes(branch.id))
+          : branchResult
+
+      setSelectedBranchId((current) =>
+        nextSelectableBranches.some((branch) => branch.id === current)
+          ? current
+          : nextSelectableBranches[0]?.id ?? '',
+      )
     } catch (error) {
       setMessage(error.message)
     }
-  }, [api])
+  }, [api, assignedBranchIds, hasAssignedBranchIds, isCompanyAdmin])
 
   const loadBranchActivity = useCallback(async (branchId) => {
     try {
@@ -1122,6 +1143,14 @@ export function SalesPage({ api }) {
       void loadBranchActivity(selectedBranchId)
     }
   }, [loadBranchActivity, selectedBranchId])
+
+  useEffect(() => {
+    if (selectedBranchId || selectableBranches.length === 0) {
+      return
+    }
+
+    setSelectedBranchId(selectableBranches[0].id)
+  }, [selectableBranches, selectedBranchId])
 
   async function logSale(event) {
     event.preventDefault()
@@ -1185,9 +1214,13 @@ export function SalesPage({ api }) {
 
       <section className="content-card">
         <FormField label="Active branch">
-          <select value={selectedBranchId} onChange={(event) => setSelectedBranchId(event.target.value)}>
+          <select
+            value={selectedBranchId}
+            disabled={!isCompanyAdmin}
+            onChange={(event) => setSelectedBranchId(event.target.value)}
+          >
             <option value="">Select branch</option>
-            {branches.map((branch) => (
+            {selectableBranches.map((branch) => (
               <option key={branch.id} value={branch.id}>
                 {branch.name}
               </option>
