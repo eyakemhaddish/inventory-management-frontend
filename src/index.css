@@ -1,21 +1,22 @@
 :root {
-  --bg: #f2eadf;
-  --bg-strong: #efe2d1;
-  --surface: rgba(255, 249, 241, 0.9);
-  --ink: #1d1a18;
-  --ink-muted: #5a5049;
-  --accent: #b85c38;
-  --accent-strong: #9f4d2d;
-  --teal-strong: #2c5d6e;
-  --line: rgba(63, 55, 49, 0.12);
-  font-family: 'Trebuchet MS', 'Gill Sans', 'Segoe UI', sans-serif;
+  --page: #f5f7fb;
+  --surface: rgba(255, 255, 255, 0.94);
+  --surface-muted: #f8fafc;
+  --surface-2: #eef2f7;
+  --text-strong: #0f172a;
+  --text-muted: #475467;
+  --border: rgba(15, 23, 42, 0.1);
+  --border-strong: rgba(15, 23, 42, 0.18);
+  --border-soft: rgba(15, 23, 42, 0.06);
+  --accent: #2563eb;
+  --accent-2: #4f7df0;
+  --success: #16804a;
+  --danger: #c24130;
+  font-family: 'Aptos', 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: var(--ink);
-  background:
-    radial-gradient(circle at top left, rgba(184, 92, 56, 0.12), transparent 36%),
-    radial-gradient(circle at bottom right, rgba(44, 93, 110, 0.12), transparent 30%),
-    linear-gradient(180deg, #f6efe4 0%, var(--bg) 100%);
+  color: var(--text-strong);
+  background: var(--page);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -34,6 +35,9 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.06), transparent 24%),
+    linear-gradient(180deg, #f8fafc 0%, #f4f7fb 100%);
 }
 
 body,
@@ -41,7 +45,7 @@ button,
 input,
 select,
 textarea {
-  font-family: 'Trebuchet MS', 'Gill Sans', 'Segoe UI', sans-serif;
+  font-family: 'Aptos', 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
 }
 
 #root {
@@ -53,31 +57,32 @@ h2,
 h3,
 h4 {
   margin: 0;
-  font-family: Georgia, 'Times New Roman', serif;
-  line-height: 1.1;
-  color: var(--ink);
+  color: var(--text-strong);
+  font-family: 'Aptos Display', 'Segoe UI Variable Display', 'Aptos', 'Segoe UI', sans-serif;
+  letter-spacing: -0.03em;
+  line-height: 1.08;
 }
 
 h1 {
-  font-size: clamp(2.4rem, 5vw, 4.9rem);
-  max-width: 12ch;
+  font-size: clamp(2.2rem, 4vw, 3.9rem);
+  max-width: 13ch;
 }
 
 h2 {
-  font-size: clamp(1.7rem, 3vw, 2.8rem);
+  font-size: clamp(1.5rem, 2.8vw, 2.3rem);
 }
 
 h3 {
-  font-size: 1.3rem;
+  font-size: 1.1rem;
 }
 
 h4 {
-  font-size: 1.05rem;
+  font-size: 0.98rem;
 }
 
 p {
   margin: 0;
-  color: var(--ink-muted);
+  color: var(--text-muted);
 }
 
 a {
