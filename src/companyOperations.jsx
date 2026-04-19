@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import {
+  canAccessCompanyPage,
+  hasUserPermission,
+  isCompanyAdminUser,
+  PERMISSIONS,
+} from './access'
 
 const EMPTY_VARIANT = {
   sku: '',
@@ -34,7 +40,7 @@ const PAYMENT_METHODS = [
 function formatCurrency(value) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency: 'ETB',
     maximumFractionDigits: 2,
   }).format(Number(value ?? 0))
 }
@@ -93,6 +99,51 @@ function buildSalesDashboardPath(branchScope, windowKey) {
   }
 
   return `/reports/sales-dashboard/${branchScope}${query}`
+}
+
+function buildTransferStatusQuery(status) {
+  return status ? `?status=${encodeURIComponent(status)}` : ''
+}
+
+function buildBranchLowStockPath(branchId) {
+  return `/inventory/branch/${branchId}/low-stock`
+}
+
+function buildBranchTransfersPath(branchId, status) {
+  return `/inventory/branch/${branchId}/transfers${buildTransferStatusQuery(status)}`
+}
+
+function buildBranchProductsPath(branchId, search) {
+  const query = new URLSearchParams({ pageSize: '100' })
+  if (search) {
+    query.set('search', search)
+  }
+
+  return `/products/branch/${branchId}?${query.toString()}`
+}
+
+function buildBranchTransferCreatePath(branchId) {
+  return `/inventory/branch/${branchId}/transfers`
+}
+
+function buildBranchAuditsPath(branchId) {
+  return `/inventory/branch/${branchId}/audits`
+}
+
+function buildBranchAdjustmentPath(branchId) {
+  return `/inventory/branch/${branchId}/adjust`
+}
+
+function buildInventoryLowStockPath(branchScope) {
+  return !branchScope || branchScope === ALL_BRANCHES_VALUE
+    ? '/inventory/low-stock'
+    : buildBranchLowStockPath(branchScope)
+}
+
+function buildInventoryTransfersPath(branchScope, status) {
+  return !branchScope || branchScope === ALL_BRANCHES_VALUE
+    ? `/inventory/transfers${buildTransferStatusQuery(status)}`
+    : buildBranchTransfersPath(branchScope, status)
 }
 
 function toNumber(value) {
@@ -200,6 +251,7 @@ export function CompanyDashboardPage({ api, session }) {
     transfers: true,
   })
   const [loading, setLoading] = useState(true)
+  const [attentionLoading, setAttentionLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [selectedBranchId, setSelectedBranchId] = useState('')
   const [salesOverview, setSalesOverview] = useState(null)
@@ -209,9 +261,7 @@ export function CompanyDashboardPage({ api, session }) {
   const [todaySalesWindow, setTodaySalesWindow] = useState(null)
   const [salesMessage, setSalesMessage] = useState('')
   const [activeSalesWindowKey, setActiveSalesWindowKey] = useState('')
-  const normalizedRoleName = session?.user?.roleName?.trim().toLowerCase() ?? ''
-  const isCompanyAdmin =
-    normalizedRoleName === 'admin' || normalizedRoleName === 'company admin'
+  const isCompanyAdmin = isCompanyAdminUser(session)
 
   useEffect(() => {
     let active = true
@@ -220,12 +270,10 @@ export function CompanyDashboardPage({ api, session }) {
       setLoading(true)
       setMessage('')
 
-      const [branchesResult, lowStockResult, stockSummaryResult, transfersResult] =
+      const [branchesResult, stockSummaryResult] =
         await Promise.allSettled([
           api.get('/branches/assigned'),
-          api.get('/inventory/low-stock'),
           api.get('/reports/stock-summary'),
-          api.get('/inventory/transfers?status=Pending'),
         ])
 
       if (!active) {
@@ -235,9 +283,9 @@ export function CompanyDashboardPage({ api, session }) {
       if (branchesResult.status !== 'fulfilled') {
         setAvailability({
           branches: false,
-          lowStock: lowStockResult.status === 'fulfilled',
+          lowStock: false,
           stockSummary: stockSummaryResult.status === 'fulfilled',
-          transfers: transfersResult.status === 'fulfilled',
+          transfers: false,
         })
         setSnapshot({
           branches: [],
@@ -252,15 +300,15 @@ export function CompanyDashboardPage({ api, session }) {
 
       setAvailability({
         branches: true,
-        lowStock: lowStockResult.status === 'fulfilled',
+        lowStock: true,
         stockSummary: stockSummaryResult.status === 'fulfilled',
-        transfers: transfersResult.status === 'fulfilled',
+        transfers: true,
       })
       setSnapshot({
         branches: branchesResult.value,
-        lowStock: lowStockResult.status === 'fulfilled' ? lowStockResult.value : [],
+        lowStock: [],
         stockSummary: stockSummaryResult.status === 'fulfilled' ? stockSummaryResult.value : [],
-        transfers: transfersResult.status === 'fulfilled' ? transfersResult.value : [],
+        transfers: [],
       })
       setLoading(false)
     }
@@ -282,6 +330,48 @@ export function CompanyDashboardPage({ api, session }) {
             : snapshot.branches[0]?.id ?? '',
     )
   }, [isCompanyAdmin, snapshot.branches])
+
+  useEffect(() => {
+    let active = true
+
+    if (!selectedBranchId) {
+      setAttentionLoading(false)
+      setSnapshot((current) => ({ ...current, lowStock: [], transfers: [] }))
+      return () => {
+        active = false
+      }
+    }
+
+    async function loadAttention() {
+      setAttentionLoading(true)
+
+      const [lowStockResult, transfersResult] = await Promise.allSettled([
+        api.get(buildInventoryLowStockPath(selectedBranchId)),
+        api.get(buildInventoryTransfersPath(selectedBranchId, 'Pending')),
+      ])
+
+      if (!active) {
+        return
+      }
+
+      setAvailability((current) => ({
+        ...current,
+        lowStock: lowStockResult.status === 'fulfilled',
+        transfers: transfersResult.status === 'fulfilled',
+      }))
+      setSnapshot((current) => ({
+        ...current,
+        lowStock: lowStockResult.status === 'fulfilled' ? lowStockResult.value : [],
+        transfers: transfersResult.status === 'fulfilled' ? transfersResult.value : [],
+      }))
+      setAttentionLoading(false)
+    }
+
+    void loadAttention()
+    return () => {
+      active = false
+    }
+  }, [api, selectedBranchId])
 
   useEffect(() => {
     let active = true
@@ -433,6 +523,15 @@ export function CompanyDashboardPage({ api, session }) {
   const branchScopeOptions = isCompanyAdmin
     ? [{ id: ALL_BRANCHES_VALUE, name: 'All branches' }, ...snapshot.branches]
     : snapshot.branches
+  const canViewProductsPage = canAccessCompanyPage(session, 'products')
+  const canViewInventoryPage = canAccessCompanyPage(session, 'inventory')
+  const canViewTransfersPage = canAccessCompanyPage(session, 'transfers')
+  const canViewSalesPage = canAccessCompanyPage(session, 'sales')
+  const canViewReportsPage = canAccessCompanyPage(session, 'reports')
+  const selectedSalesScopeName =
+    salesOverview?.branchName ??
+    branchScopeOptions.find((branch) => branch.id === selectedBranchId)?.name ??
+    'the selected scope'
   const salesWindowOptions = salesOverview?.availableWindows ?? []
   const activeSalesWindow = salesOverview?.window ?? null
   const isSalesSectionLoading =
@@ -505,7 +604,7 @@ export function CompanyDashboardPage({ api, session }) {
           }
           note={
             todaySalesWindow
-              ? `Net sales for ${salesOverview.branchName}`
+              ? `Net sales for ${selectedSalesScopeName}`
               : 'Visible only when this branch has a permitted today sales window'
           }
         />
@@ -518,7 +617,7 @@ export function CompanyDashboardPage({ api, session }) {
             <p>Low stock and pending transfers that need action.</p>
           </div>
 
-          {loading ? (
+          {loading || attentionLoading ? (
             <EmptyCard text="Loading dashboard..." compact />
           ) : !availability.lowStock && !availability.transfers ? (
             <EmptyCard text="Inventory alerts are unavailable for this role." compact />
@@ -560,26 +659,36 @@ export function CompanyDashboardPage({ api, session }) {
             <p>Jump into the operational pages.</p>
           </div>
           <div className="quick-links">
-            <NavLink to="/app/company/products" className="quick-link-card">
-              <strong>Products</strong>
-              <span>Create products and variants</span>
-            </NavLink>
-            <NavLink to="/app/company/inventory" className="quick-link-card">
-              <strong>Inventory</strong>
-              <span>Adjust stock and review balances</span>
-            </NavLink>
-            <NavLink to="/app/company/transfers" className="quick-link-card">
-              <strong>Transfers</strong>
-              <span>Approve, ship, and receive stock</span>
-            </NavLink>
-            <NavLink to="/app/company/sales" className="quick-link-card">
-              <strong>Sales</strong>
-              <span>Log POS sales and handle returns</span>
-            </NavLink>
-            <NavLink to="/app/company/reports" className="quick-link-card">
-              <strong>Reports</strong>
-              <span>View summaries and export data</span>
-            </NavLink>
+            {canViewProductsPage ? (
+              <NavLink to="/app/company/products" className="quick-link-card">
+                <strong>Products</strong>
+                <span>Create products and variants</span>
+              </NavLink>
+            ) : null}
+            {canViewInventoryPage ? (
+              <NavLink to="/app/company/inventory" className="quick-link-card">
+                <strong>Inventory</strong>
+                <span>Adjust stock and review balances</span>
+              </NavLink>
+            ) : null}
+            {canViewTransfersPage ? (
+              <NavLink to="/app/company/transfers" className="quick-link-card">
+                <strong>Transfers</strong>
+                <span>Approve, ship, and receive stock</span>
+              </NavLink>
+            ) : null}
+            {canViewSalesPage ? (
+              <NavLink to="/app/company/sales" className="quick-link-card">
+                <strong>Sales</strong>
+                <span>Log POS sales and handle returns</span>
+              </NavLink>
+            ) : null}
+            {canViewReportsPage ? (
+              <NavLink to="/app/company/reports" className="quick-link-card">
+                <strong>Reports</strong>
+                <span>View summaries and export data</span>
+              </NavLink>
+            ) : null}
           </div>
         </article>
       </section>
@@ -790,6 +899,8 @@ function TopProductsList({ items }) {
 }
 
 export function ProductsPage({ api }) {
+  const [branches, setBranches] = useState([])
+  const [selectedBranchId, setSelectedBranchId] = useState('')
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -804,13 +915,21 @@ export function ProductsPage({ api }) {
     reorderPoint: 0,
   })
   const [variants, setVariants] = useState([{ ...EMPTY_VARIANT }])
+  const selectedBranchName =
+    branches.find((branch) => branch.id === selectedBranchId)?.name ?? 'the selected branch'
 
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (branchId) => {
+    if (!branchId) {
+      setProducts([])
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setMessage('')
 
     try {
-      const result = await api.get('/products?pageSize=100')
+      const result = await api.get(buildBranchProductsPath(branchId))
       setProducts(result.items ?? [])
     } catch (error) {
       setMessage(error.message)
@@ -820,8 +939,41 @@ export function ProductsPage({ api }) {
   }, [api])
 
   useEffect(() => {
-    void loadProducts()
-  }, [loadProducts])
+    let active = true
+
+    async function loadBranches() {
+      setLoading(true)
+      setMessage('')
+
+      try {
+        const branchResult = await api.get('/branches/assigned')
+        if (!active) {
+          return
+        }
+
+        setBranches(branchResult)
+        setSelectedBranchId((current) =>
+          branchResult.some((branch) => branch.id === current) ? current : branchResult[0]?.id ?? '',
+        )
+      } catch (error) {
+        if (active) {
+          setBranches([])
+          setSelectedBranchId('')
+          setMessage(error.message)
+          setLoading(false)
+        }
+      }
+    }
+
+    void loadBranches()
+    return () => {
+      active = false
+    }
+  }, [api])
+
+  useEffect(() => {
+    void loadProducts(selectedBranchId)
+  }, [loadProducts, selectedBranchId])
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -849,7 +1001,7 @@ export function ProductsPage({ api }) {
         reorderPoint: 0,
       })
       setVariants([{ ...EMPTY_VARIANT }])
-      await loadProducts()
+      await loadProducts(selectedBranchId)
       setMessage('Product created.')
     } catch (error) {
       setMessage(error.message)
@@ -874,7 +1026,6 @@ export function ProductsPage({ api }) {
         variant.attribute1,
         variant.attribute2,
         variant.sellingPrice,
-        variant.centralQuantity,
         variant.totalQuantity,
       ]),
     )
@@ -895,8 +1046,7 @@ export function ProductsPage({ api }) {
         'Attribute1',
         'Attribute2',
         'SellingPrice',
-        'CentralQuantity',
-        'TotalQuantity',
+        'ScopedQuantity',
       ],
       rows,
     )
@@ -948,7 +1098,9 @@ export function ProductsPage({ api }) {
           attribute2: row[indexByHeader.Attribute2] ?? '',
           barcode: '',
           sellingPrice: toNumber(row[indexByHeader.SellingPrice]),
-          openingQuantity: toNumber(row[indexByHeader.CentralQuantity]),
+          openingQuantity: toNumber(
+            row[indexByHeader.ScopedQuantity] ?? row[indexByHeader.CentralQuantity],
+          ),
         })
 
         productsByCode.set(code, existing)
@@ -958,7 +1110,7 @@ export function ProductsPage({ api }) {
         await api.post('/products', product)
       }
 
-      await loadProducts()
+      await loadProducts(selectedBranchId)
       setMessage(`Imported ${productsByCode.size} products.`)
     } catch (error) {
       setMessage(error.message)
@@ -1087,11 +1239,28 @@ export function ProductsPage({ api }) {
         <section className="content-card">
           <div className="section-heading">
             <h3>Current catalog</h3>
-            <p>{loading ? 'Loading products...' : `${products.length} products available`}</p>
+            <p>
+              {loading
+                ? 'Loading products...'
+                : `${products.length} products visible for ${selectedBranchName}`}
+            </p>
           </div>
+
+          <FormField label="Branch scope">
+            <select value={selectedBranchId} onChange={(event) => setSelectedBranchId(event.target.value)}>
+              <option value="">Select branch</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name}
+                </option>
+              ))}
+            </select>
+          </FormField>
 
           {loading ? (
             <EmptyCard text="Loading products..." compact />
+          ) : !selectedBranchId ? (
+            <EmptyCard text="Select a branch to load products." compact />
           ) : products.length === 0 ? (
             <EmptyCard text="No products created yet." compact />
           ) : (
@@ -1119,7 +1288,7 @@ export function ProductsPage({ api }) {
                         </div>
                         <div className="mini-row-meta">
                           <span>{formatCurrency(variant.sellingPrice)}</span>
-                          <span>Central {variant.centralQuantity} • Total {variant.totalQuantity}</span>
+                          <span>{selectedBranchName} {variant.totalQuantity}</span>
                         </div>
                       </article>
                     ))}
@@ -1134,7 +1303,7 @@ export function ProductsPage({ api }) {
   )
 }
 
-export function InventoryPage({ api }) {
+export function InventoryPage({ api, session }) {
   const [branches, setBranches] = useState([])
   const [products, setProducts] = useState([])
   const [centralInventory, setCentralInventory] = useState([])
@@ -1143,6 +1312,7 @@ export function InventoryPage({ api }) {
   const [selectedBranchId, setSelectedBranchId] = useState('')
   const [lowStock, setLowStock] = useState([])
   const [loading, setLoading] = useState(true)
+  const [branchLoading, setBranchLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [adjustment, setAdjustment] = useState({
@@ -1153,38 +1323,66 @@ export function InventoryPage({ api }) {
   })
 
   const variants = normalizeProductVariants(products)
+  const isCompanyAdmin = isCompanyAdminUser(session)
+  const selectedBranchName =
+    branches.find((branch) => branch.id === selectedBranchId)?.name ?? 'the selected branch'
 
   const loadPage = useCallback(async () => {
     setLoading(true)
     setMessage('')
 
     try {
-      const [branchResult, productResult, centralResult, lowStockResult, auditResult] = await Promise.all([
+      const [branchResult, centralResult] = await Promise.all([
         api.get('/branches/assigned'),
-        api.get('/products?pageSize=100'),
         api.get('/inventory/central'),
-        api.get('/inventory/low-stock'),
-        api.get('/inventory/audits'),
       ])
 
       setBranches(branchResult)
-      setProducts(productResult.items ?? [])
       setCentralInventory(centralResult)
-      setLowStock(lowStockResult)
-      setAudits(auditResult)
-      setSelectedBranchId(branchResult[0]?.id ?? '')
+      setSelectedBranchId((current) =>
+        branchResult.some((branch) => branch.id === current) ? current : branchResult[0]?.id ?? '',
+      )
+      setAdjustment((current) => {
+        if (isCompanyAdmin) {
+          return branchResult.some((branch) => branch.id === current.branchId)
+            ? current
+            : { ...current, branchId: '' }
+        }
+
+        return branchResult.some((branch) => branch.id === current.branchId)
+          ? current
+          : { ...current, branchId: branchResult[0]?.id ?? '' }
+      })
     } catch (error) {
       setMessage(error.message)
     } finally {
       setLoading(false)
     }
-  }, [api])
+  }, [api, isCompanyAdmin])
 
-  const loadBranchInventory = useCallback(async (branchId) => {
+  const loadBranchContext = useCallback(async (branchId) => {
+    setBranchLoading(true)
+
     try {
-      setBranchInventory(await api.get(`/inventory/branch/${branchId}`))
+      const [productResult, inventoryResult, lowStockResult, auditResult] = await Promise.all([
+        api.get(buildBranchProductsPath(branchId)),
+        api.get(`/inventory/branch/${branchId}`),
+        api.get(buildBranchLowStockPath(branchId)),
+        api.get(buildBranchAuditsPath(branchId)),
+      ])
+
+      setProducts(productResult.items ?? [])
+      setBranchInventory(inventoryResult)
+      setLowStock(lowStockResult)
+      setAudits(auditResult)
     } catch (error) {
+      setProducts([])
+      setBranchInventory([])
+      setLowStock([])
+      setAudits([])
       setMessage(error.message)
+    } finally {
+      setBranchLoading(false)
     }
   }, [api])
 
@@ -1194,9 +1392,16 @@ export function InventoryPage({ api }) {
 
   useEffect(() => {
     if (selectedBranchId) {
-      void loadBranchInventory(selectedBranchId)
+      void loadBranchContext(selectedBranchId)
+      return
     }
-  }, [loadBranchInventory, selectedBranchId])
+
+    setBranchLoading(false)
+    setProducts([])
+    setBranchInventory([])
+    setLowStock([])
+    setAudits([])
+  }, [loadBranchContext, selectedBranchId])
 
   async function submitAdjustment(event) {
     event.preventDefault()
@@ -1204,17 +1409,31 @@ export function InventoryPage({ api }) {
     setMessage('')
 
     try {
-      await api.post('/inventory/adjust', {
+      if (!adjustment.branchId && !isCompanyAdmin) {
+        throw new Error('Select a branch to adjust inventory.')
+      }
+
+      const requestBody = {
         productVariantId: adjustment.productVariantId,
-        branchId: adjustment.branchId || null,
         quantityChange: toNumber(adjustment.quantityChange),
         reason: adjustment.reason,
-      })
+      }
 
-      setAdjustment({ productVariantId: '', branchId: '', quantityChange: '', reason: '' })
+      if (adjustment.branchId) {
+        await api.post(buildBranchAdjustmentPath(adjustment.branchId), requestBody)
+      } else {
+        await api.post('/inventory/adjust', { ...requestBody, branchId: null })
+      }
+
+      setAdjustment({
+        productVariantId: '',
+        branchId: isCompanyAdmin ? '' : adjustment.branchId,
+        quantityChange: '',
+        reason: '',
+      })
       await loadPage()
       if (selectedBranchId) {
-        await loadBranchInventory(selectedBranchId)
+        await loadBranchContext(selectedBranchId)
       }
       setMessage('Inventory adjusted.')
     } catch (error) {
@@ -1256,7 +1475,7 @@ export function InventoryPage({ api }) {
 
           <FormField label="Location">
             <select value={adjustment.branchId} onChange={(event) => setAdjustment((current) => ({ ...current, branchId: event.target.value }))}>
-              <option value="">Central store</option>
+              {isCompanyAdmin ? <option value="">Central store</option> : null}
               {branches.map((branch) => (
                 <option key={branch.id} value={branch.id}>
                   {branch.name}
@@ -1281,13 +1500,17 @@ export function InventoryPage({ api }) {
         <section className="content-card">
           <div className="section-heading">
             <h3>Low stock alerts</h3>
-            <p>{loading ? 'Loading alerts...' : `${lowStock.length} active alerts`}</p>
+            <p>
+              {loading || branchLoading
+                ? 'Loading alerts...'
+                : `${lowStock.length} active alerts for ${selectedBranchName}`}
+            </p>
           </div>
 
-          {loading ? (
+          {loading || branchLoading ? (
             <EmptyCard text="Loading low stock alerts..." compact />
           ) : lowStock.length === 0 ? (
-            <EmptyCard text="No low stock alerts." compact />
+            <EmptyCard text="No low stock alerts for this branch." compact />
           ) : (
             <div className="stack-list">
               {lowStock.map((item) => (
@@ -1335,13 +1558,17 @@ export function InventoryPage({ api }) {
       <section className="content-card">
         <div className="section-heading">
           <h3>Recent stock audits</h3>
-          <p>{loading ? 'Loading stock audit trail...' : `${audits.length} recent audit records`}</p>
+          <p>
+            {loading || branchLoading
+              ? 'Loading stock audit trail...'
+              : `${audits.length} recent audit records for ${selectedBranchName}`}
+          </p>
         </div>
 
-        {loading ? (
+        {loading || branchLoading ? (
           <EmptyCard text="Loading stock audits..." compact />
         ) : audits.length === 0 ? (
-          <EmptyCard text="No stock audit records yet." compact />
+          <EmptyCard text="No stock audit records for this branch yet." compact />
         ) : (
           <div className="stack-list">
             {audits.slice(0, 20).map((audit) => (
@@ -1366,41 +1593,82 @@ export function InventoryPage({ api }) {
   )
 }
 
-export function TransfersPage({ api }) {
+export function TransfersPage({ api, session }) {
   const [branches, setBranches] = useState([])
   const [products, setProducts] = useState([])
   const [transfers, setTransfers] = useState([])
+  const [selectedBranchId, setSelectedBranchId] = useState('')
   const [loading, setLoading] = useState(true)
+  const [queueLoading, setQueueLoading] = useState(false)
   const [busyId, setBusyId] = useState('')
   const [message, setMessage] = useState('')
   const [form, setForm] = useState({
     productVariantId: '',
     fromBranchId: '',
-    toBranchId: '',
     quantity: 1,
     notes: '',
   })
 
   const variants = normalizeProductVariants(products)
+  const canRequestTransfer = hasUserPermission(session, PERMISSIONS.stockTransfer)
+  const canApproveTransfer = hasUserPermission(session, PERMISSIONS.stockTransferApprove)
+  const canReceiveTransfer = hasUserPermission(session, PERMISSIONS.stockTransferReceive)
+  const canViewProducts = hasUserPermission(session, PERMISSIONS.productView)
+  const canUseTransferForm = canRequestTransfer && canViewProducts
+  const selectedBranchName =
+    branches.find((branch) => branch.id === selectedBranchId)?.name ?? 'the selected branch'
 
   const loadPage = useCallback(async () => {
     setLoading(true)
     setMessage('')
 
     try {
-      const [branchResult, productResult, transferResult] = await Promise.all([
-        api.get('/branches/assigned'),
-        api.get('/products?pageSize=100'),
-        api.get('/inventory/transfers'),
-      ])
+      const branchResult = await api.get('/branches/assigned')
 
       setBranches(branchResult)
-      setProducts(productResult.items ?? [])
-      setTransfers(transferResult)
+      setSelectedBranchId((current) =>
+        branchResult.some((branch) => branch.id === current) ? current : branchResult[0]?.id ?? '',
+      )
     } catch (error) {
+      setBranches([])
+      setProducts([])
+      setSelectedBranchId('')
       setMessage(error.message)
     } finally {
       setLoading(false)
+    }
+  }, [api])
+
+  const loadBranchProducts = useCallback(async (branchId) => {
+    if (!canUseTransferForm || !branchId) {
+      setProducts([])
+      return
+    }
+
+    try {
+      const result = await api.get(buildBranchProductsPath(branchId))
+      setProducts(result.items ?? [])
+    } catch (error) {
+      setProducts([])
+      setMessage(error.message)
+    }
+  }, [api, canUseTransferForm])
+
+  const loadTransfers = useCallback(async (branchId) => {
+    if (!branchId) {
+      setTransfers([])
+      return
+    }
+
+    setQueueLoading(true)
+
+    try {
+      setTransfers(await api.get(buildBranchTransfersPath(branchId)))
+    } catch (error) {
+      setTransfers([])
+      setMessage(error.message)
+    } finally {
+      setQueueLoading(false)
     }
   }, [api])
 
@@ -1408,22 +1676,37 @@ export function TransfersPage({ api }) {
     void loadPage()
   }, [loadPage])
 
+  useEffect(() => {
+    if (selectedBranchId) {
+      void loadBranchProducts(selectedBranchId)
+      void loadTransfers(selectedBranchId)
+      return
+    }
+
+    setProducts([])
+    setQueueLoading(false)
+    setTransfers([])
+  }, [loadBranchProducts, loadTransfers, selectedBranchId])
+
   async function requestTransfer(event) {
     event.preventDefault()
     setBusyId('create')
     setMessage('')
 
     try {
-      await api.post('/inventory/transfer', {
+      if (!selectedBranchId) {
+        throw new Error('Select a branch to request a transfer.')
+      }
+
+      await api.post(buildBranchTransferCreatePath(selectedBranchId), {
         productVariantId: form.productVariantId,
         fromBranchId: form.fromBranchId || null,
-        toBranchId: form.toBranchId,
         quantity: toNumber(form.quantity),
         notes: form.notes,
       })
 
-      setForm({ productVariantId: '', fromBranchId: '', toBranchId: '', quantity: 1, notes: '' })
-      await loadPage()
+      setForm({ productVariantId: '', fromBranchId: '', quantity: 1, notes: '' })
+      await loadTransfers(selectedBranchId)
       setMessage('Transfer requested.')
     } catch (error) {
       setMessage(error.message)
@@ -1449,7 +1732,7 @@ export function TransfersPage({ api }) {
         await api.put(`/inventory/transfers/${transfer.id}/receive`, { notes: 'Received at destination' })
       }
 
-      await loadPage()
+      await loadTransfers(selectedBranchId)
     } catch (error) {
       setMessage(error.message)
     } finally {
@@ -1467,69 +1750,117 @@ export function TransfersPage({ api }) {
 
       {message ? <InlineMessage text={message} tone={message === 'Transfer requested.' ? 'info' : 'error'} /> : null}
 
+      <section className="content-card">
+        <div className="section-heading">
+          <h3>Branch scope</h3>
+          <p>Choose the branch whose transfer queue and requests you want to manage.</p>
+        </div>
+
+        <FormField label="Branch">
+          <select value={selectedBranchId} onChange={(event) => setSelectedBranchId(event.target.value)}>
+            <option value="">Select branch</option>
+            {branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.name}
+              </option>
+            ))}
+          </select>
+        </FormField>
+      </section>
+
       <section className="split-grid">
-        <form className="content-card stack-form" onSubmit={requestTransfer}>
-          <div className="section-heading">
-            <h3>Request transfer</h3>
-            <p>Leave source empty to move stock from the central store.</p>
-          </div>
+        {canUseTransferForm ? (
+          <form className="content-card stack-form" onSubmit={requestTransfer}>
+            <div className="section-heading">
+              <h3>Request transfer</h3>
+              <p>
+                Transfers are created for {selectedBranchName}. Leave source empty to move
+                stock from the central store.
+              </p>
+            </div>
 
-          <FormField label="Variant">
-            <select required value={form.productVariantId} onChange={(event) => setForm((current) => ({ ...current, productVariantId: event.target.value }))}>
-              <option value="">Select a variant</option>
-              {variants.map((variant) => (
-                <option key={variant.id} value={variant.id}>
-                  {buildVariantLabel(variant)}
-                </option>
-              ))}
-            </select>
-          </FormField>
+            <FormField label="Variant">
+              <select required value={form.productVariantId} onChange={(event) => setForm((current) => ({ ...current, productVariantId: event.target.value }))}>
+                <option value="">Select a variant</option>
+                {variants.map((variant) => (
+                  <option key={variant.id} value={variant.id}>
+                    {buildVariantLabel(variant)}
+                  </option>
+                ))}
+              </select>
+            </FormField>
 
-          <FormField label="Source">
-            <select value={form.fromBranchId} onChange={(event) => setForm((current) => ({ ...current, fromBranchId: event.target.value }))}>
-              <option value="">Central store</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </select>
-          </FormField>
+            <FormField label="Source">
+              <select value={form.fromBranchId} onChange={(event) => setForm((current) => ({ ...current, fromBranchId: event.target.value }))}>
+                <option value="">Central store</option>
+                {branches
+                  .filter((branch) => branch.id !== selectedBranchId)
+                  .map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+              </select>
+            </FormField>
 
-          <FormField label="Destination">
-            <select required value={form.toBranchId} onChange={(event) => setForm((current) => ({ ...current, toBranchId: event.target.value }))}>
-              <option value="">Select branch</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </select>
-          </FormField>
+            <FormField label="Destination">
+              <input disabled value={selectedBranchId ? selectedBranchName : 'Select a branch first'} />
+            </FormField>
 
-          <FormField label="Quantity">
-            <input required type="number" min="1" value={form.quantity} onChange={(event) => setForm((current) => ({ ...current, quantity: event.target.value }))} />
-          </FormField>
+            <FormField label="Quantity">
+              <input required type="number" min="1" value={form.quantity} onChange={(event) => setForm((current) => ({ ...current, quantity: event.target.value }))} />
+            </FormField>
 
-          <FormField label="Notes">
-            <textarea rows="4" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} />
-          </FormField>
+            <FormField label="Notes">
+              <textarea rows="4" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} />
+            </FormField>
 
-          <button className="primary-button" disabled={busyId === 'create'} type="submit">
-            {busyId === 'create' ? 'Saving...' : 'Request transfer'}
-          </button>
-        </form>
+            <button className="primary-button" disabled={busyId === 'create' || !selectedBranchId} type="submit">
+              {busyId === 'create' ? 'Saving...' : 'Request transfer'}
+            </button>
+          </form>
+        ) : (
+          <section className="content-card">
+            <div className="section-heading">
+              <h3>Transfer access</h3>
+              <p>
+                {canRequestTransfer
+                  ? 'Transfer creation also requires product viewing access for variant selection.'
+                  : 'This role can view transfer activity only.'}
+              </p>
+            </div>
+            <EmptyCard
+              text={
+                canRequestTransfer
+                  ? 'Grant product view access to enable transfer creation from this page.'
+                  : 'Transfer requests are disabled for this role.'
+              }
+              compact
+            />
+          </section>
+        )}
 
         <section className="content-card">
           <div className="section-heading">
             <h3>Transfer queue</h3>
-            <p>{loading ? 'Loading transfers...' : `${transfers.length} transfer records`}</p>
+            <p>
+              {loading || queueLoading
+                ? 'Loading transfers...'
+                : `${transfers.length} transfer records for ${selectedBranchName}`}
+            </p>
           </div>
 
-          {loading ? (
+          {loading || queueLoading ? (
             <EmptyCard text="Loading transfers..." compact />
           ) : transfers.length === 0 ? (
-            <EmptyCard text="No transfers yet." compact />
+            <EmptyCard
+              text={
+                selectedBranchId
+                  ? 'No transfers for this branch yet.'
+                  : 'Select a branch to load transfers.'
+              }
+              compact
+            />
           ) : (
             <div className="stack-list">
               {transfers.map((transfer) => (
@@ -1550,17 +1881,17 @@ export function TransfersPage({ api }) {
                   </div>
 
                   <div className="page-actions">
-                    {transfer.status === 'Pending' ? (
+                    {transfer.status === 'Pending' && canApproveTransfer ? (
                       <button type="button" className="ghost-button" disabled={busyId === transfer.id} onClick={() => progressTransfer(transfer, 'approve')}>
                         {busyId === transfer.id ? 'Working...' : 'Approve'}
                       </button>
                     ) : null}
-                    {transfer.status === 'Approved' ? (
+                    {transfer.status === 'Approved' && canApproveTransfer ? (
                       <button type="button" className="ghost-button" disabled={busyId === transfer.id} onClick={() => progressTransfer(transfer, 'ship')}>
                         {busyId === transfer.id ? 'Working...' : 'Ship'}
                       </button>
                     ) : null}
-                    {transfer.status === 'Shipped' ? (
+                    {transfer.status === 'Shipped' && canReceiveTransfer ? (
                       <button type="button" className="ghost-button" disabled={busyId === transfer.id} onClick={() => progressTransfer(transfer, 'receive')}>
                         {busyId === transfer.id ? 'Working...' : 'Receive'}
                       </button>
@@ -1599,9 +1930,7 @@ export function SalesPage({ api, session }) {
     reason: '',
   })
 
-  const normalizedRoleName = session?.user?.roleName?.trim().toLowerCase() ?? ''
-  const isCompanyAdmin =
-    normalizedRoleName === 'admin' || normalizedRoleName === 'company admin'
+  const isCompanyAdmin = isCompanyAdminUser(session)
   const assignedBranchIds = session?.user?.branchIds ?? []
   const hasAssignedBranchIds = assignedBranchIds.length > 0
   const selectableBranches = isCompanyAdmin

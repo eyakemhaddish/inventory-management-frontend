@@ -23,6 +23,7 @@ import {
   SalesPage,
   TransfersPage,
 } from './companyOperations'
+import { canAccessCompanyPage } from './access'
 import './App.css'
 
 const SESSION_STORAGE_KEY = 'ims.session'
@@ -58,6 +59,7 @@ const DEFAULT_ROLE_TEMPLATES = [
       'sale.return',
       'sale.view_all',
       'stock.view',
+      'stock.transfer_view',
       'stock.transfer',
       'stock.transfer_receive',
       'user.create',
@@ -84,6 +86,7 @@ const DEFAULT_ROLE_TEMPLATES = [
       'product.import',
       'product.export',
       'stock.view',
+      'stock.transfer_view',
       'stock.adjust',
       'stock.transfer',
       'stock.transfer_approve',
@@ -274,6 +277,18 @@ function App() {
     setSession(nextSession)
   }
 
+  function renderCompanyPage(pageKey, element) {
+    if (session?.user.isSuperAdmin) {
+      return <Navigate to="/app/platform/companies" replace />
+    }
+
+    if (!canAccessCompanyPage(session, pageKey)) {
+      return <Navigate to="/app/company/overview" replace />
+    }
+
+    return element
+  }
+
   return (
     <BrowserRouter>
       <Routes>
@@ -345,83 +360,35 @@ function App() {
           />
           <Route
             path="company/products"
-            element={
-              session?.user.isSuperAdmin ? (
-                <Navigate to="/app/platform/companies" replace />
-              ) : (
-                <ProductsPage api={api} />
-              )
-            }
+            element={renderCompanyPage('products', <ProductsPage api={api} />)}
           />
           <Route
             path="company/inventory"
-            element={
-              session?.user.isSuperAdmin ? (
-                <Navigate to="/app/platform/companies" replace />
-              ) : (
-                <InventoryPage api={api} />
-              )
-            }
+            element={renderCompanyPage('inventory', <InventoryPage api={api} session={session} />)}
           />
           <Route
             path="company/transfers"
-            element={
-              session?.user.isSuperAdmin ? (
-                <Navigate to="/app/platform/companies" replace />
-              ) : (
-                <TransfersPage api={api} />
-              )
-            }
+            element={renderCompanyPage('transfers', <TransfersPage api={api} session={session} />)}
           />
           <Route
             path="company/sales"
-            element={
-              session?.user.isSuperAdmin ? (
-                <Navigate to="/app/platform/companies" replace />
-              ) : (
-                <SalesPage api={api} session={session} />
-              )
-            }
+            element={renderCompanyPage('sales', <SalesPage api={api} session={session} />)}
           />
           <Route
             path="company/reports"
-            element={
-              session?.user.isSuperAdmin ? (
-                <Navigate to="/app/platform/companies" replace />
-              ) : (
-                <ReportsPage api={api} />
-              )
-            }
+            element={renderCompanyPage('reports', <ReportsPage api={api} />)}
           />
           <Route
             path="company/branches"
-            element={
-              session?.user.isSuperAdmin ? (
-                <Navigate to="/app/platform/companies" replace />
-              ) : (
-                <BranchesPage api={api} />
-              )
-            }
+            element={renderCompanyPage('branches', <BranchesPage api={api} />)}
           />
           <Route
             path="company/roles"
-            element={
-              session?.user.isSuperAdmin ? (
-                <Navigate to="/app/platform/companies" replace />
-              ) : (
-                <RolesPage api={api} />
-              )
-            }
+            element={renderCompanyPage('roles', <RolesPage api={api} />)}
           />
           <Route
             path="company/users"
-            element={
-              session?.user.isSuperAdmin ? (
-                <Navigate to="/app/platform/companies" replace />
-              ) : (
-                <UsersPage api={api} />
-              )
-            }
+            element={renderCompanyPage('users', <UsersPage api={api} />)}
           />
           <Route
             path="*"
@@ -771,16 +738,16 @@ function AppLayout({ clearSession, session }) {
   const primaryLinks = session.user.isSuperAdmin
     ? [{ to: '/app/platform/companies', label: 'Companies' }]
     : [
-        { to: '/app/company/overview', label: 'Overview' },
-        { to: '/app/company/products', label: 'Products' },
-        { to: '/app/company/inventory', label: 'Inventory' },
-        { to: '/app/company/transfers', label: 'Transfers' },
-        { to: '/app/company/sales', label: 'Sales' },
-        { to: '/app/company/reports', label: 'Reports' },
-        { to: '/app/company/branches', label: 'Branches' },
-        { to: '/app/company/roles', label: 'Roles' },
-        { to: '/app/company/users', label: 'Users' },
-      ]
+        { to: '/app/company/overview', label: 'Overview', pageKey: 'overview' },
+        { to: '/app/company/products', label: 'Products', pageKey: 'products' },
+        { to: '/app/company/inventory', label: 'Inventory', pageKey: 'inventory' },
+        { to: '/app/company/transfers', label: 'Transfers', pageKey: 'transfers' },
+        { to: '/app/company/sales', label: 'Sales', pageKey: 'sales' },
+        { to: '/app/company/reports', label: 'Reports', pageKey: 'reports' },
+        { to: '/app/company/branches', label: 'Branches', pageKey: 'branches' },
+        { to: '/app/company/roles', label: 'Roles', pageKey: 'roles' },
+        { to: '/app/company/users', label: 'Users', pageKey: 'users' },
+      ].filter((link) => canAccessCompanyPage(session, link.pageKey))
 
   return (
     <div className="workspace-shell">
