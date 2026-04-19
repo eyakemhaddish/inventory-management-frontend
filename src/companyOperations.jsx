@@ -37,6 +37,12 @@ function formatCurrency(value) {
   }).format(Number(value ?? 0))
 }
 
+function formatNumber(value) {
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 0,
+  }).format(Number(value ?? 0))
+}
+
 function formatDate(value) {
   if (!value) {
     return 'Not available'
@@ -141,11 +147,21 @@ export function CompanyDashboardPage({ api }) {
     branches: [],
     lowStock: [],
     stockSummary: [],
-    salesByBranch: [],
     transfers: [],
+  })
+  const [availability, setAvailability] = useState({
+    branches: true,
+    lowStock: true,
+    stockSummary: true,
+    transfers: true,
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [selectedBranchId, setSelectedBranchId] = useState('')
+  const [salesOverview, setSalesOverview] = useState(null)
+  const [salesLoading, setSalesLoading] = useState(false)
+  const [salesMessage, setSalesMessage] = useState('')
+  const [activeSalesWindowKey, setActiveSalesWindowKey] = useState('')
 
   useEffect(() => {
     let active = true
@@ -154,29 +170,49 @@ export function CompanyDashboardPage({ api }) {
       setLoading(true)
       setMessage('')
 
-      try {
-        const [branches, lowStock, stockSummary, salesByBranch, transfers] = await Promise.all([
-          api.get('/branches'),
+      const [branchesResult, lowStockResult, stockSummaryResult, transfersResult] =
+        await Promise.allSettled([
+          api.get('/branches/assigned'),
           api.get('/inventory/low-stock'),
           api.get('/reports/stock-summary'),
-          api.get('/reports/sales-by-branch'),
           api.get('/inventory/transfers?status=Pending'),
         ])
 
-        if (!active) {
-          return
-        }
-
-        setSnapshot({ branches, lowStock, stockSummary, salesByBranch, transfers })
-      } catch (error) {
-        if (active) {
-          setMessage(error.message)
-        }
-      } finally {
-        if (active) {
-          setLoading(false)
-        }
+      if (!active) {
+        return
       }
+
+      if (branchesResult.status !== 'fulfilled') {
+        setAvailability({
+          branches: false,
+          lowStock: lowStockResult.status === 'fulfilled',
+          stockSummary: stockSummaryResult.status === 'fulfilled',
+          transfers: transfersResult.status === 'fulfilled',
+        })
+        setSnapshot({
+          branches: [],
+          lowStock: [],
+          stockSummary: [],
+          transfers: [],
+        })
+        setMessage(branchesResult.reason?.message ?? 'Dashboard branches could not be loaded.')
+        setLoading(false)
+        return
+      }
+
+      setAvailability({
+        branches: true,
+        lowStock: lowStockResult.status === 'fulfilled',
+        stockSummary: stockSummaryResult.status === 'fulfilled',
+        transfers: transfersResult.status === 'fulfilled',
+      })
+      setSnapshot({
+        branches: branchesResult.value,
+        lowStock: lowStockResult.status === 'fulfilled' ? lowStockResult.value : [],
+        stockSummary: stockSummaryResult.status === 'fulfilled' ? stockSummaryResult.value : [],
+        transfers: transfersResult.status === 'fulfilled' ? transfersResult.value : [],
+      })
+      setLoading(false)
     }
 
     void load()
@@ -185,24 +221,135 @@ export function CompanyDashboardPage({ api }) {
     }
   }, [api])
 
+  useEffect(() => {
+    setSelectedBranchId((current) =>
+      snapshot.branches.some((branch) => branch.id === current)
+        ? current
+        : snapshot.branches[0]?.id ?? '',
+    )
+  }, [snapshot.branches])
+
+  useEffect(() => {
+    let active = true
+
+    if (!selectedBranchId) {
+      setSalesOverview(null)
+      setActiveSalesWindowKey('')
+      setSalesMessage(
+        snapshot.branches.length === 0
+          ? 'Assign at least one branch to unlock branch-level sales insights.'
+          : 'Select a branch to load sales insights.',
+      )
+      return () => {
+        active = false
+      }
+    }
+
+    async function loadSalesOverview() {
+      setSalesLoading(true)
+      setSalesMessage('')
+
+      try {
+        const result = await api.get(`/reports/sales-dashboard/${selectedBranchId}`)
+        if (!active) {
+          return
+        }
+
+        setSalesOverview(result)
+        setActiveSalesWindowKey((current) =>
+          result.windows.some((window) => window.key === current)
+            ? current
+            : result.windows[0]?.key ?? '',
+        )
+      } catch (error) {
+        if (active) {
+          setSalesOverview(null)
+          setActiveSalesWindowKey('')
+          setSalesMessage(error.message)
+        }
+      } finally {
+        if (active) {
+          setSalesLoading(false)
+        }
+      }
+    }
+
+    void loadSalesOverview()
+    return () => {
+      active = false
+    }
+  }, [api, selectedBranchId, snapshot.branches.length])
+
   const totalUnits = snapshot.stockSummary.reduce((sum, item) => sum + item.totalQuantity, 0)
-  const totalSales = snapshot.salesByBranch.reduce((sum, item) => sum + item.totalSalesValue, 0)
+  const todayWindow = salesOverview?.windows.find((window) => window.key === 'today') ?? null
+  const activeSalesWindow =
+    salesOverview?.windows.find((window) => window.key === activeSalesWindowKey) ??
+    salesOverview?.windows[0] ??
+    null
 
   return (
     <div className="page-stack">
       <PageHeader
         eyebrow="Company workspace"
         title="Operations overview"
-        description="Monitor stock, sales, low stock alerts, and pending transfers without leaving the dashboard."
+        description="Track inventory pressure, branch activity, and the sales windows each role is allowed to see."
       />
 
       {message ? <InlineMessage text={message} tone="error" /> : null}
 
       <section className="stats-grid">
-        <StatCard label="Branches" value={loading ? '...' : snapshot.branches.length} note="Active company locations" />
-        <StatCard label="Tracked variants" value={loading ? '...' : snapshot.stockSummary.length} note="Sellable stock units" />
-        <StatCard label="Total stock" value={loading ? '...' : totalUnits} note="Combined central and branch quantity" />
-        <StatCard label="Sales value" value={loading ? '...' : formatCurrency(totalSales)} note="Current aggregated sales value" />
+        <StatCard
+          label="Branches"
+          value={loading ? '...' : availability.branches ? snapshot.branches.length : 'Restricted'}
+          note="Accessible locations for this user"
+        />
+        <StatCard
+          label="Tracked variants"
+          value={
+            loading
+              ? '...'
+              : availability.stockSummary
+                ? snapshot.stockSummary.length
+                : 'Restricted'
+          }
+          note={
+            availability.stockSummary
+              ? 'Sellable stock units'
+              : 'Needs inventory reporting access'
+          }
+        />
+        <StatCard
+          label="Total stock"
+          value={
+            loading
+              ? '...'
+              : availability.stockSummary
+                ? formatNumber(totalUnits)
+                : 'Restricted'
+          }
+          note={
+            availability.stockSummary
+              ? 'Combined central and branch quantity'
+              : 'Needs inventory reporting access'
+          }
+        />
+        <StatCard
+          label="Today sales"
+          value={
+            salesLoading
+              ? '...'
+              : todayWindow
+                ? formatCurrency(todayWindow.netSalesValue)
+                : selectedBranchId
+                  ? 'Restricted'
+                  : '--'
+          }
+          note={
+            todayWindow
+              ? `Net sales for ${salesOverview.branchName}`
+              : 'Visible only when this branch has a permitted sales window'
+          }
+        />
       </section>
 
       <section className="split-grid">
@@ -214,24 +361,36 @@ export function CompanyDashboardPage({ api }) {
 
           {loading ? (
             <EmptyCard text="Loading dashboard..." compact />
+          ) : !availability.lowStock && !availability.transfers ? (
+            <EmptyCard text="Inventory alerts are unavailable for this role." compact />
           ) : (
             <div className="stack-list">
               <div className="mini-summary">
-                <strong>{snapshot.lowStock.length}</strong>
-                <span>Variants at or below reorder point</span>
+                <strong>{availability.lowStock ? snapshot.lowStock.length : 'Restricted'}</strong>
+                <span>
+                  {availability.lowStock
+                    ? 'Variants at or below reorder point'
+                    : 'Low stock alerts require stock access'}
+                </span>
               </div>
               <div className="mini-summary">
-                <strong>{snapshot.transfers.length}</strong>
-                <span>Pending transfer requests</span>
+                <strong>{availability.transfers ? snapshot.transfers.length : 'Restricted'}</strong>
+                <span>
+                  {availability.transfers
+                    ? 'Pending transfer requests'
+                    : 'Pending transfers require stock access'}
+                </span>
               </div>
-              {snapshot.lowStock.slice(0, 4).map((item) => (
-                <article key={item.productVariantId} className="list-card compact-card">
-                  <strong>{item.productName}</strong>
-                  <span>
-                    {item.variantDescription} • {item.currentQuantity} {item.unitOfMeasure}
-                  </span>
-                </article>
-              ))}
+              {availability.lowStock
+                ? snapshot.lowStock.slice(0, 4).map((item) => (
+                    <article key={item.productVariantId} className="list-card compact-card">
+                      <strong>{item.productName}</strong>
+                      <span>
+                        {item.variantDescription} | {item.currentQuantity} {item.unitOfMeasure}
+                      </span>
+                    </article>
+                  ))
+                : null}
             </div>
           )}
         </article>
@@ -265,6 +424,217 @@ export function CompanyDashboardPage({ api }) {
           </div>
         </article>
       </section>
+
+      <section className="content-card sales-analytics-shell">
+        <div className="sales-analytics-header">
+          <div className="section-heading">
+            <h3>Branch sales insights</h3>
+            <p>
+              Each card below is permission-aware. Roles only see the sales windows enabled
+              for the selected branch.
+            </p>
+          </div>
+
+          {snapshot.branches.length > 0 ? (
+            <div className="sales-filter-controls">
+              <FormField label="Branch">
+                <select
+                  value={selectedBranchId}
+                  onChange={(event) => setSelectedBranchId(event.target.value)}
+                >
+                  {snapshot.branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+            </div>
+          ) : null}
+        </div>
+
+        {salesLoading ? (
+          <EmptyCard text="Loading sales insights..." compact />
+        ) : salesMessage ? (
+          <EmptyCard text={salesMessage} compact />
+        ) : !salesOverview || salesOverview.windows.length === 0 ? (
+          <EmptyCard text="No sales insight windows are enabled for this role yet." compact />
+        ) : (
+          <>
+            <div className="sales-window-grid">
+              {salesOverview.windows.map((window) => (
+                <SalesWindowCard
+                  key={window.key}
+                  active={activeSalesWindow?.key === window.key}
+                  window={window}
+                  onSelect={() => setActiveSalesWindowKey(window.key)}
+                />
+              ))}
+            </div>
+
+            {activeSalesWindow ? (
+              <div className="sales-analytics-layout">
+                <article className="sales-spotlight-panel">
+                  <div className="sales-spotlight-header">
+                    <div className="sales-spotlight-copy">
+                      <span className="status-pill subtle">{salesOverview.branchName}</span>
+                      <h3>{activeSalesWindow.label}</h3>
+                      <p>
+                        Sales and refunds for this branch in the selected reporting window.
+                      </p>
+                    </div>
+                    <div className="sales-spotlight-total">
+                      <span>Net sales</span>
+                      <strong>{formatCurrency(activeSalesWindow.netSalesValue)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="sales-metric-strip">
+                    <div className="sales-metric-card">
+                      <span>Gross sales</span>
+                      <strong>{formatCurrency(activeSalesWindow.totalSalesValue)}</strong>
+                    </div>
+                    <div className="sales-metric-card">
+                      <span>Transactions</span>
+                      <strong>{formatNumber(activeSalesWindow.transactionCount)}</strong>
+                    </div>
+                    <div className="sales-metric-card">
+                      <span>Units sold</span>
+                      <strong>{formatNumber(activeSalesWindow.quantitySold)}</strong>
+                    </div>
+                    <div className="sales-metric-card">
+                      <span>Average ticket</span>
+                      <strong>{formatCurrency(activeSalesWindow.averageTicketValue)}</strong>
+                    </div>
+                    <div className="sales-metric-card">
+                      <span>Refunds</span>
+                      <strong>{formatCurrency(activeSalesWindow.refundAmount)}</strong>
+                    </div>
+                  </div>
+
+                  <SalesTrendChart points={activeSalesWindow.trend} />
+                </article>
+
+                <div className="sales-side-stack">
+                  <article className="sales-breakdown-card">
+                    <div className="section-heading">
+                      <h3>Payment mix</h3>
+                      <p>How this branch collected revenue in the selected window.</p>
+                    </div>
+                    <PaymentBreakdownList items={activeSalesWindow.paymentBreakdown} />
+                  </article>
+
+                  <article className="sales-breakdown-card">
+                    <div className="section-heading">
+                      <h3>Top products</h3>
+                      <p>The strongest products by quantity sold in the selected window.</p>
+                    </div>
+                    <TopProductsList items={activeSalesWindow.topProducts} />
+                  </article>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function SalesWindowCard({ active, onSelect, window }) {
+  return (
+    <button
+      type="button"
+      className={active ? 'sales-window-card active' : 'sales-window-card'}
+      onClick={onSelect}
+    >
+      <div className="sales-window-card-top">
+        <span className="status-pill subtle">{window.label}</span>
+        <span>{formatNumber(window.transactionCount)} sales</span>
+      </div>
+      <strong>{formatCurrency(window.netSalesValue)}</strong>
+      <div className="sales-window-metrics">
+        <small>Gross {formatCurrency(window.totalSalesValue)}</small>
+        <small>Refunds {formatCurrency(window.refundAmount)}</small>
+      </div>
+    </button>
+  )
+}
+
+function SalesTrendChart({ points }) {
+  const highestSalesValue = Math.max(...points.map((point) => Number(point.salesValue)), 0)
+
+  return (
+    <div className="sales-chart">
+      <div className="section-heading">
+        <h3>Sales graph</h3>
+        <p>Visualized branch sales for the active reporting window.</p>
+      </div>
+
+      <div className="sales-chart-grid">
+        {points.map((point) => {
+          const height =
+            highestSalesValue === 0 ? 0 : (Number(point.salesValue) / highestSalesValue) * 100
+          const visibleHeight = height === 0 ? 0 : Math.max(height, 10)
+
+          return (
+            <div key={`${point.bucketStartUtc}-${point.label}`} className="sales-chart-bar">
+              <div className="sales-chart-track">
+                <div className="sales-chart-fill" style={{ height: `${visibleHeight}%` }} />
+              </div>
+              <div className="sales-chart-meta">
+                <strong>{point.label}</strong>
+                <span>{formatCurrency(point.salesValue)}</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function PaymentBreakdownList({ items }) {
+  if (items.length === 0) {
+    return <EmptyCard text="No payment activity in this window yet." compact />
+  }
+
+  return (
+    <div className="sales-breakdown-list">
+      {items.map((item) => (
+        <div key={item.paymentMethod} className="sales-breakdown-row">
+          <div>
+            <strong>{item.paymentMethod}</strong>
+            <span>{formatNumber(item.transactionCount)} transactions</span>
+          </div>
+          <strong>{formatCurrency(item.totalSalesValue)}</strong>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TopProductsList({ items }) {
+  if (items.length === 0) {
+    return <EmptyCard text="No products sold in this window yet." compact />
+  }
+
+  return (
+    <div className="sales-product-list">
+      {items.map((item) => (
+        <div key={item.productVariantId} className="sales-product-row">
+          <div>
+            <strong>{item.productName}</strong>
+            <span>
+              {item.variantDescription} | {item.sku}
+            </span>
+          </div>
+          <div className="sales-product-meta">
+            <strong>{formatNumber(item.quantitySold)} sold</strong>
+            <span>{formatCurrency(item.totalSalesValue)}</span>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
