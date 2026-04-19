@@ -51,6 +51,44 @@ function formatDate(value) {
   return new Date(value).toLocaleString()
 }
 
+function formatSalesWindowRange(window) {
+  if (!window) {
+    return 'Not available'
+  }
+
+  const from = new Date(window.fromUtc)
+  const to = new Date(window.toUtc)
+  const isSameDay = from.toDateString() === to.toDateString()
+
+  if (isSameDay) {
+    return from.toLocaleDateString('en-US', {
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+    })
+  }
+
+  const sameYear = from.getFullYear() === to.getFullYear()
+  const startDate = from.toLocaleDateString('en-US', {
+    month: 'short',
+    day: '2-digit',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  })
+  const endDate = to.toLocaleDateString('en-US', {
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+  })
+
+  return `${startDate} - ${endDate}`
+}
+
+function buildSalesDashboardPath(branchId, windowKey) {
+  return windowKey
+    ? `/reports/sales-dashboard/${branchId}?window=${encodeURIComponent(windowKey)}`
+    : `/reports/sales-dashboard/${branchId}`
+}
+
 function toNumber(value) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : 0
@@ -159,7 +197,10 @@ export function CompanyDashboardPage({ api }) {
   const [message, setMessage] = useState('')
   const [selectedBranchId, setSelectedBranchId] = useState('')
   const [salesOverview, setSalesOverview] = useState(null)
+  const [salesMetadataLoading, setSalesMetadataLoading] = useState(false)
   const [salesLoading, setSalesLoading] = useState(false)
+  const [todaySalesLoading, setTodaySalesLoading] = useState(false)
+  const [todaySalesWindow, setTodaySalesWindow] = useState(null)
   const [salesMessage, setSalesMessage] = useState('')
   const [activeSalesWindowKey, setActiveSalesWindowKey] = useState('')
 
@@ -234,6 +275,7 @@ export function CompanyDashboardPage({ api }) {
 
     if (!selectedBranchId) {
       setSalesOverview(null)
+      setTodaySalesWindow(null)
       setActiveSalesWindowKey('')
       setSalesMessage(
         snapshot.branches.length === 0
@@ -245,26 +287,71 @@ export function CompanyDashboardPage({ api }) {
       }
     }
 
-    async function loadSalesOverview() {
-      setSalesLoading(true)
+    async function loadSalesOverviewMetadata() {
+      setSalesMetadataLoading(true)
+      setSalesOverview(null)
+      setTodaySalesWindow(null)
+      setActiveSalesWindowKey('')
       setSalesMessage('')
 
       try {
-        const result = await api.get(`/reports/sales-dashboard/${selectedBranchId}`)
+        const result = await api.get(buildSalesDashboardPath(selectedBranchId))
         if (!active) {
           return
         }
 
         setSalesOverview(result)
         setActiveSalesWindowKey((current) =>
-          result.windows.some((window) => window.key === current)
+          result.availableWindows.some((window) => window.key === current)
             ? current
-            : result.windows[0]?.key ?? '',
+            : result.availableWindows[0]?.key ?? '',
         )
       } catch (error) {
         if (active) {
           setSalesOverview(null)
+          setTodaySalesWindow(null)
           setActiveSalesWindowKey('')
+          setSalesMessage(error.message)
+        }
+      } finally {
+        if (active) {
+          setSalesMetadataLoading(false)
+        }
+      }
+    }
+
+    void loadSalesOverviewMetadata()
+    return () => {
+      active = false
+    }
+  }, [api, selectedBranchId, snapshot.branches.length])
+
+  useEffect(() => {
+    let active = true
+
+    if (!selectedBranchId || !activeSalesWindowKey) {
+      setSalesOverview((current) => (current ? { ...current, window: null } : null))
+      return () => {
+        active = false
+      }
+    }
+
+    async function loadSelectedSalesWindow() {
+      setSalesLoading(true)
+      setSalesMessage('')
+
+      try {
+        const result = await api.get(
+          buildSalesDashboardPath(selectedBranchId, activeSalesWindowKey),
+        )
+        if (!active) {
+          return
+        }
+
+        setSalesOverview(result)
+      } catch (error) {
+        if (active) {
+          setSalesOverview((current) => (current ? { ...current, window: null } : null))
           setSalesMessage(error.message)
         }
       } finally {
@@ -274,18 +361,72 @@ export function CompanyDashboardPage({ api }) {
       }
     }
 
-    void loadSalesOverview()
+    void loadSelectedSalesWindow()
     return () => {
       active = false
     }
-  }, [api, selectedBranchId, snapshot.branches.length])
+  }, [activeSalesWindowKey, api, selectedBranchId])
+
+  useEffect(() => {
+    let active = true
+
+    const salesWindowOptions = salesOverview?.availableWindows ?? []
+    const canViewTodaySales = salesWindowOptions.some((window) => window.key === 'today')
+
+    if (!selectedBranchId || !canViewTodaySales) {
+      setTodaySalesWindow(null)
+      setTodaySalesLoading(false)
+      return () => {
+        active = false
+      }
+    }
+
+    if (activeSalesWindowKey === 'today') {
+      setTodaySalesWindow(salesOverview?.window?.key === 'today' ? salesOverview.window : null)
+      setTodaySalesLoading(false)
+      return () => {
+        active = false
+      }
+    }
+
+    async function loadTodaySalesWindow() {
+      setTodaySalesLoading(true)
+
+      try {
+        const result = await api.get(buildSalesDashboardPath(selectedBranchId, 'today'))
+        if (!active) {
+          return
+        }
+
+        setTodaySalesWindow(result.window ?? null)
+      } catch {
+        if (active) {
+          setTodaySalesWindow(null)
+        }
+      } finally {
+        if (active) {
+          setTodaySalesLoading(false)
+        }
+      }
+    }
+
+    void loadTodaySalesWindow()
+    return () => {
+      active = false
+    }
+  }, [activeSalesWindowKey, api, salesOverview, selectedBranchId])
 
   const totalUnits = snapshot.stockSummary.reduce((sum, item) => sum + item.totalQuantity, 0)
-  const todayWindow = salesOverview?.windows.find((window) => window.key === 'today') ?? null
-  const activeSalesWindow =
-    salesOverview?.windows.find((window) => window.key === activeSalesWindowKey) ??
-    salesOverview?.windows[0] ??
-    null
+  const salesWindowOptions = salesOverview?.availableWindows ?? []
+  const activeSalesWindow = salesOverview?.window ?? null
+  const isSalesSectionLoading =
+    salesMetadataLoading ||
+    salesLoading ||
+    (salesWindowOptions.length > 0 && !activeSalesWindow && !salesMessage)
+  const isTodaySalesLoading =
+    salesMetadataLoading ||
+    (activeSalesWindowKey === 'today' ? isSalesSectionLoading : todaySalesLoading)
+  const canViewTodaySales = salesWindowOptions.some((window) => window.key === 'today')
 
   return (
     <div className="page-stack">
@@ -336,18 +477,20 @@ export function CompanyDashboardPage({ api }) {
         <StatCard
           label="Today sales"
           value={
-            salesLoading
+            isTodaySalesLoading
               ? '...'
-              : todayWindow
-                ? formatCurrency(todayWindow.netSalesValue)
+              : todaySalesWindow
+                ? formatCurrency(todaySalesWindow.netSalesValue)
                 : selectedBranchId
-                  ? 'Restricted'
+                  ? canViewTodaySales
+                    ? '--'
+                    : 'Restricted'
                   : '--'
           }
           note={
-            todayWindow
+            todaySalesWindow
               ? `Net sales for ${salesOverview.branchName}`
-              : 'Visible only when this branch has a permitted sales window'
+              : 'Visible only when this branch has a permitted today sales window'
           }
         />
       </section>
@@ -430,8 +573,8 @@ export function CompanyDashboardPage({ api }) {
           <div className="section-heading">
             <h3>Branch sales insights</h3>
             <p>
-              Each card below is permission-aware. Roles only see the sales windows enabled
-              for the selected branch.
+              Sales windows are permission-aware. Roles only see the reporting windows
+              enabled for the selected branch.
             </p>
           </div>
 
@@ -449,29 +592,37 @@ export function CompanyDashboardPage({ api }) {
                   ))}
                 </select>
               </FormField>
+              <FormField label="Sales window">
+                <select
+                  value={activeSalesWindowKey}
+                  disabled={salesWindowOptions.length === 0}
+                  onChange={(event) => setActiveSalesWindowKey(event.target.value)}
+                >
+                  {salesWindowOptions.length === 0 ? (
+                    <option value="">
+                      {salesMetadataLoading ? 'Loading windows...' : 'No windows available'}
+                    </option>
+                  ) : (
+                    salesWindowOptions.map((window) => (
+                      <option key={window.key} value={window.key}>
+                        {window.label}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </FormField>
             </div>
           ) : null}
         </div>
 
-        {salesLoading ? (
+        {isSalesSectionLoading ? (
           <EmptyCard text="Loading sales insights..." compact />
         ) : salesMessage ? (
           <EmptyCard text={salesMessage} compact />
-        ) : !salesOverview || salesOverview.windows.length === 0 ? (
+        ) : !salesOverview || salesWindowOptions.length === 0 ? (
           <EmptyCard text="No sales insight windows are enabled for this role yet." compact />
         ) : (
           <>
-            <div className="sales-window-grid">
-              {salesOverview.windows.map((window) => (
-                <SalesWindowCard
-                  key={window.key}
-                  active={activeSalesWindow?.key === window.key}
-                  window={window}
-                  onSelect={() => setActiveSalesWindowKey(window.key)}
-                />
-              ))}
-            </div>
-
             {activeSalesWindow ? (
               <div className="sales-analytics-layout">
                 <article className="sales-spotlight-panel">
@@ -480,7 +631,8 @@ export function CompanyDashboardPage({ api }) {
                       <span className="status-pill subtle">{salesOverview.branchName}</span>
                       <h3>{activeSalesWindow.label}</h3>
                       <p>
-                        Sales and refunds for this branch in the selected reporting window.
+                        {formatSalesWindowRange(activeSalesWindow)} | Sales and refunds for
+                        this branch in the selected reporting window.
                       </p>
                     </div>
                     <div className="sales-spotlight-total">
@@ -541,26 +693,6 @@ export function CompanyDashboardPage({ api }) {
   )
 }
 
-function SalesWindowCard({ active, onSelect, window }) {
-  return (
-    <button
-      type="button"
-      className={active ? 'sales-window-card active' : 'sales-window-card'}
-      onClick={onSelect}
-    >
-      <div className="sales-window-card-top">
-        <span className="status-pill subtle">{window.label}</span>
-        <span>{formatNumber(window.transactionCount)} sales</span>
-      </div>
-      <strong>{formatCurrency(window.netSalesValue)}</strong>
-      <div className="sales-window-metrics">
-        <small>Gross {formatCurrency(window.totalSalesValue)}</small>
-        <small>Refunds {formatCurrency(window.refundAmount)}</small>
-      </div>
-    </button>
-  )
-}
-
 function SalesTrendChart({ points }) {
   const highestSalesValue = Math.max(...points.map((point) => Number(point.salesValue)), 0)
 
@@ -568,27 +700,29 @@ function SalesTrendChart({ points }) {
     <div className="sales-chart">
       <div className="section-heading">
         <h3>Sales graph</h3>
-        <p>Visualized branch sales for the active reporting window.</p>
+        <p>Bar graph of branch sales for the active reporting window.</p>
       </div>
 
-      <div className="sales-chart-grid">
-        {points.map((point) => {
-          const height =
-            highestSalesValue === 0 ? 0 : (Number(point.salesValue) / highestSalesValue) * 100
-          const visibleHeight = height === 0 ? 0 : Math.max(height, 10)
+      <div className="sales-chart-scroll">
+        <div className="sales-chart-grid">
+          {points.map((point) => {
+            const height =
+              highestSalesValue === 0 ? 0 : (Number(point.salesValue) / highestSalesValue) * 100
+            const visibleHeight = height === 0 ? 0 : Math.max(height, 10)
 
-          return (
-            <div key={`${point.bucketStartUtc}-${point.label}`} className="sales-chart-bar">
-              <div className="sales-chart-track">
-                <div className="sales-chart-fill" style={{ height: `${visibleHeight}%` }} />
+            return (
+              <div key={`${point.bucketStartUtc}-${point.label}`} className="sales-chart-bar">
+                <div className="sales-chart-track">
+                  <div className="sales-chart-fill" style={{ height: `${visibleHeight}%` }} />
+                </div>
+                <div className="sales-chart-meta">
+                  <strong>{point.label}</strong>
+                  <span>{formatCurrency(point.salesValue)}</span>
+                </div>
               </div>
-              <div className="sales-chart-meta">
-                <strong>{point.label}</strong>
-                <span>{formatCurrency(point.salesValue)}</span>
-              </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
     </div>
   )
