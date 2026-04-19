@@ -640,7 +640,7 @@ export function InventoryPage({ api }) {
 
     try {
       const [branchResult, productResult, centralResult, lowStockResult, auditResult] = await Promise.all([
-        api.get('/branches'),
+        api.get('/branches/assigned'),
         api.get('/products?pageSize=100'),
         api.get('/inventory/central'),
         api.get('/inventory/low-stock'),
@@ -869,7 +869,7 @@ export function TransfersPage({ api }) {
 
     try {
       const [branchResult, productResult, transferResult] = await Promise.all([
-        api.get('/branches'),
+        api.get('/branches/assigned'),
         api.get('/products?pageSize=100'),
         api.get('/inventory/transfers'),
       ])
@@ -1552,10 +1552,12 @@ function InventoryList({ balances, emptyText }) {
               <span>{balance.variantDescription} • {balance.sku}</span>
             </div>
             <span className={balance.isLowStock ? 'status-pill' : 'status-pill success'}>
-              {balance.quantity} {balance.unitOfMeasure}
+              Live {balance.quantity} {balance.unitOfMeasure}
             </span>
           </div>
-          <span>{balance.locationType === 'Branch' ? balance.branchName : 'Central store'}</span>
+          <span>
+            {balance.locationType === 'Branch' ? balance.branchName : 'Central store'} - Original {balance.originalQuantity} {balance.unitOfMeasure}
+          </span>
         </article>
       ))}
     </div>
