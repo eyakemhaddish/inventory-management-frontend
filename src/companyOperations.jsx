@@ -19,6 +19,8 @@ const EMPTY_SALE_LINE = {
   quantity: 1,
 }
 
+const ALL_BRANCHES_VALUE = '__all_branches__'
+
 const PAYMENT_METHODS = [
   'Cash',
   'Telebirr',
@@ -83,10 +85,14 @@ function formatSalesWindowRange(window) {
   return `${startDate} - ${endDate}`
 }
 
-function buildSalesDashboardPath(branchId, windowKey) {
-  return windowKey
-    ? `/reports/sales-dashboard/${branchId}?window=${encodeURIComponent(windowKey)}`
-    : `/reports/sales-dashboard/${branchId}`
+function buildSalesDashboardPath(branchScope, windowKey) {
+  const query = windowKey ? `?window=${encodeURIComponent(windowKey)}` : ''
+
+  if (!branchScope || branchScope === ALL_BRANCHES_VALUE) {
+    return `/reports/sales-dashboard${query}`
+  }
+
+  return `/reports/sales-dashboard/${branchScope}${query}`
 }
 
 function toNumber(value) {
@@ -180,7 +186,7 @@ function normalizeProductVariants(products) {
   )
 }
 
-export function CompanyDashboardPage({ api }) {
+export function CompanyDashboardPage({ api, session }) {
   const [snapshot, setSnapshot] = useState({
     branches: [],
     lowStock: [],
@@ -203,6 +209,9 @@ export function CompanyDashboardPage({ api }) {
   const [todaySalesWindow, setTodaySalesWindow] = useState(null)
   const [salesMessage, setSalesMessage] = useState('')
   const [activeSalesWindowKey, setActiveSalesWindowKey] = useState('')
+  const normalizedRoleName = session?.user?.roleName?.trim().toLowerCase() ?? ''
+  const isCompanyAdmin =
+    normalizedRoleName === 'admin' || normalizedRoleName === 'company admin'
 
   useEffect(() => {
     let active = true
@@ -264,11 +273,15 @@ export function CompanyDashboardPage({ api }) {
 
   useEffect(() => {
     setSelectedBranchId((current) =>
-      snapshot.branches.some((branch) => branch.id === current)
+      current === ALL_BRANCHES_VALUE && isCompanyAdmin
         ? current
-        : snapshot.branches[0]?.id ?? '',
+        : snapshot.branches.some((branch) => branch.id === current)
+          ? current
+          : isCompanyAdmin && snapshot.branches.length > 0
+            ? ALL_BRANCHES_VALUE
+            : snapshot.branches[0]?.id ?? '',
     )
-  }, [snapshot.branches])
+  }, [isCompanyAdmin, snapshot.branches])
 
   useEffect(() => {
     let active = true
@@ -279,8 +292,8 @@ export function CompanyDashboardPage({ api }) {
       setActiveSalesWindowKey('')
       setSalesMessage(
         snapshot.branches.length === 0
-          ? 'Assign at least one branch to unlock branch-level sales insights.'
-          : 'Select a branch to load sales insights.',
+          ? 'Assign at least one branch to unlock sales insights.'
+          : 'Select a branch scope to load sales insights.',
       )
       return () => {
         active = false
@@ -417,6 +430,9 @@ export function CompanyDashboardPage({ api }) {
   }, [activeSalesWindowKey, api, salesOverview, selectedBranchId])
 
   const totalUnits = snapshot.stockSummary.reduce((sum, item) => sum + item.totalQuantity, 0)
+  const branchScopeOptions = isCompanyAdmin
+    ? [{ id: ALL_BRANCHES_VALUE, name: 'All branches' }, ...snapshot.branches]
+    : snapshot.branches
   const salesWindowOptions = salesOverview?.availableWindows ?? []
   const activeSalesWindow = salesOverview?.window ?? null
   const isSalesSectionLoading =
@@ -580,12 +596,12 @@ export function CompanyDashboardPage({ api }) {
 
           {snapshot.branches.length > 0 ? (
             <div className="sales-filter-controls">
-              <FormField label="Branch">
+              <FormField label={isCompanyAdmin ? 'Branch scope' : 'Branch'}>
                 <select
                   value={selectedBranchId}
                   onChange={(event) => setSelectedBranchId(event.target.value)}
                 >
-                  {snapshot.branches.map((branch) => (
+                  {branchScopeOptions.map((branch) => (
                     <option key={branch.id} value={branch.id}>
                       {branch.name}
                     </option>
@@ -632,7 +648,7 @@ export function CompanyDashboardPage({ api }) {
                       <h3>{activeSalesWindow.label}</h3>
                       <p>
                         {formatSalesWindowRange(activeSalesWindow)} | Sales and refunds for
-                        this branch in the selected reporting window.
+                        the selected scope in the active reporting window.
                       </p>
                     </div>
                     <div className="sales-spotlight-total">
@@ -1594,19 +1610,16 @@ export function SalesPage({ api, session }) {
       ? branches.filter((branch) => assignedBranchIds.includes(branch.id))
       : branches
   const variants = normalizeProductVariants(products)
+  const emptyReturnForm = { saleId: '', saleLineId: '', quantity: 1, restock: true, reason: '' }
   const selectedSale = sales.find((sale) => sale.id === returnForm.saleId)
 
   const loadPage = useCallback(async () => {
     setMessage('')
 
     try {
-      const [branchResult, productResult] = await Promise.all([
-        api.get('/branches/assigned'),
-        api.get('/products?pageSize=100'),
-      ])
+      const branchResult = await api.get('/branches/assigned')
 
       setBranches(branchResult)
-      setProducts(productResult.items ?? [])
 
       const nextSelectableBranches = isCompanyAdmin
         ? branchResult
@@ -1624,15 +1637,39 @@ export function SalesPage({ api, session }) {
     }
   }, [api, assignedBranchIds, hasAssignedBranchIds, isCompanyAdmin])
 
-  const loadBranchActivity = useCallback(async (branchId) => {
+  const loadBranchContext = useCallback(async (branchId) => {
     try {
-      const [saleResult, returnResult] = await Promise.all([
+      const [saleResult, returnResult, productResult] = await Promise.all([
         api.get(`/sales/branch/${branchId}`),
         api.get(`/sales/returns/branch/${branchId}`),
+        api.get(`/products/branch/${branchId}/available?pageSize=100`),
       ])
 
       setSales(saleResult)
       setReturns(returnResult)
+      setProducts(productResult.items ?? [])
+
+      const availableVariantIds = new Set(
+        normalizeProductVariants(productResult.items ?? []).map((variant) => variant.id),
+      )
+
+      setSaleLines((current) =>
+        current.map((line) =>
+          line.productVariantId && !availableVariantIds.has(line.productVariantId)
+            ? { ...line, productVariantId: '' }
+            : line,
+        ),
+      )
+      setReturnForm((current) => {
+        const matchingSale = saleResult.find((sale) => sale.id === current.saleId)
+        if (!matchingSale) {
+          return emptyReturnForm
+        }
+
+        return matchingSale.lines.some((line) => line.id === current.saleLineId)
+          ? current
+          : { ...current, saleLineId: '' }
+      })
     } catch (error) {
       setMessage(error.message)
     }
@@ -1644,9 +1681,15 @@ export function SalesPage({ api, session }) {
 
   useEffect(() => {
     if (selectedBranchId) {
-      void loadBranchActivity(selectedBranchId)
+      void loadBranchContext(selectedBranchId)
+      return
     }
-  }, [loadBranchActivity, selectedBranchId])
+
+    setProducts([])
+    setSales([])
+    setReturns([])
+    setReturnForm(emptyReturnForm)
+  }, [loadBranchContext, selectedBranchId])
 
   useEffect(() => {
     if (selectedBranchId || selectableBranches.length === 0) {
@@ -1673,7 +1716,7 @@ export function SalesPage({ api, session }) {
 
       setSaleForm({ paymentMethod: 'Cash', customerName: '', customerPhoneNumber: '', notes: '' })
       setSaleLines([{ ...EMPTY_SALE_LINE }])
-      await loadBranchActivity(selectedBranchId)
+      await loadBranchContext(selectedBranchId)
       setMessage('Sale logged.')
     } catch (error) {
       setMessage(error.message)
@@ -1696,8 +1739,8 @@ export function SalesPage({ api, session }) {
         reason: returnForm.reason,
       })
 
-      setReturnForm({ saleId: '', saleLineId: '', quantity: 1, restock: true, reason: '' })
-      await loadBranchActivity(selectedBranchId)
+      setReturnForm(emptyReturnForm)
+      await loadBranchContext(selectedBranchId)
       setMessage('Return processed.')
     } catch (error) {
       setMessage(error.message)
