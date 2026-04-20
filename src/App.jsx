@@ -23,7 +23,7 @@ import {
   SalesPage,
   TransfersPage,
 } from './companyOperations'
-import { canAccessCompanyPage } from './access'
+import { canAccessCompanyPage, hasUserPermission, PERMISSIONS } from './access'
 import './App.css'
 
 const SESSION_STORAGE_KEY = 'ims.session'
@@ -385,7 +385,7 @@ function App() {
           />
           <Route
             path="company/products"
-            element={renderCompanyPage('products', <ProductsPage api={api} />)}
+            element={renderCompanyPage('products', <ProductsPage api={api} session={session} />)}
           />
           <Route
             path="company/inventory"
@@ -401,11 +401,11 @@ function App() {
           />
           <Route
             path="company/reports"
-            element={renderCompanyPage('reports', <ReportsPage api={api} />)}
+            element={renderCompanyPage('reports', <ReportsPage api={api} session={session} />)}
           />
           <Route
             path="company/branches"
-            element={renderCompanyPage('branches', <BranchesPage api={api} />)}
+            element={renderCompanyPage('branches', <BranchesPage api={api} session={session} />)}
           />
           <Route
             path="company/roles"
@@ -413,7 +413,7 @@ function App() {
           />
           <Route
             path="company/users"
-            element={renderCompanyPage('users', <UsersPage api={api} />)}
+            element={renderCompanyPage('users', <UsersPage api={api} session={session} />)}
           />
           <Route
             path="*"
@@ -1005,12 +1005,13 @@ function PlatformCompaniesPage({ api }) {
   )
 }
 
-function BranchesPage({ api }) {
+function BranchesPage({ api, session }) {
   const [branches, setBranches] = useState([])
   const [form, setForm] = useState({ name: '', location: '' })
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const canCreateBranch = hasUserPermission(session, PERMISSIONS.branchCreate)
 
   const loadBranches = useCallback(async () => {
     setLoading(true)
@@ -1054,37 +1055,39 @@ function BranchesPage({ api }) {
       />
 
       <section className="split-grid">
-        <form className="content-card stack-form" onSubmit={handleSubmit}>
-          <div className="section-heading">
-            <h3>Add branch</h3>
-            <p>Create a new operational location.</p>
-          </div>
+        {canCreateBranch ? (
+          <form className="content-card stack-form" onSubmit={handleSubmit}>
+            <div className="section-heading">
+              <h3>Add branch</h3>
+              <p>Create a new operational location.</p>
+            </div>
 
-          <FormField label="Branch name">
-            <input
-              required
-              value={form.name}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, name: event.target.value }))
-              }
-            />
-          </FormField>
-          <FormField label="Location">
-            <input
-              required
-              value={form.location}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, location: event.target.value }))
-              }
-            />
-          </FormField>
+            <FormField label="Branch name">
+              <input
+                required
+                value={form.name}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, name: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField label="Location">
+              <input
+                required
+                value={form.location}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, location: event.target.value }))
+                }
+              />
+            </FormField>
 
-          {message ? <InlineMessage text={message} tone="error" /> : null}
+            {message ? <InlineMessage text={message} tone="error" /> : null}
 
-          <button className="primary-button" disabled={busy} type="submit">
-            {busy ? 'Saving...' : 'Add branch'}
-          </button>
-        </form>
+            <button className="primary-button" disabled={busy} type="submit">
+              {busy ? 'Saving...' : 'Add branch'}
+            </button>
+          </form>
+        ) : null}
 
         <section className="content-card">
           <div className="section-heading">
@@ -1808,7 +1811,7 @@ function RolePermissionGroups({
   )
 }
 
-function UsersPage({ api }) {
+function UsersPage({ api, session }) {
   const [roles, setRoles] = useState([])
   const [users, setUsers] = useState([])
   const [branches, setBranches] = useState([])
@@ -1824,6 +1827,8 @@ function UsersPage({ api }) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [message, setMessage] = useState('')
+  const canCreateUser = hasUserPermission(session, PERMISSIONS.userCreate)
+  const canAssignRole = hasUserPermission(session, PERMISSIONS.userAssignRole)
 
   const loadUsersPage = useCallback(async () => {
     setLoading(true)
@@ -1915,89 +1920,91 @@ function UsersPage({ api }) {
       {message ? <InlineMessage text={message} tone="error" /> : null}
 
       <section className="split-grid">
-        <form className="content-card stack-form" onSubmit={createUser}>
-          <div className="section-heading">
-            <h3>Create user</h3>
-            <p>Add a new team member and set initial access.</p>
-          </div>
+        {canCreateUser ? (
+          <form className="content-card stack-form" onSubmit={createUser}>
+            <div className="section-heading">
+              <h3>Create user</h3>
+              <p>Add a new team member and set initial access.</p>
+            </div>
 
-          <div className="input-grid">
-            <FormField label="Full name">
-              <input
-                required
-                value={form.fullName}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, fullName: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="Email">
-              <input
-                required
-                type="email"
-                value={form.email}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, email: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="Password">
-              <input
-                required
-                type="password"
-                value={form.password}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, password: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="Phone number">
-              <input
-                value={form.phoneNumber}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, phoneNumber: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="Initial role">
-              <select
-                value={form.roleId}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, roleId: event.target.value }))
-                }
-              >
-                <option value="">No role</option>
-                {roles.map((role) => (
-                  <option key={role.id} value={role.id}>
-                    {role.name}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-          </div>
-
-          <div className="pill-grid">
-            {branches.map((branch) => (
-              <label key={branch.id} className="toggle-pill">
+            <div className="input-grid">
+              <FormField label="Full name">
                 <input
-                  type="checkbox"
-                  checked={form.branchIds.includes(branch.id)}
-                  onChange={() =>
-                    setForm((current) => ({
-                      ...current,
-                      branchIds: toggleSelection(current.branchIds, branch.id),
-                    }))
+                  required
+                  value={form.fullName}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, fullName: event.target.value }))
                   }
                 />
-                <span>{branch.name}</span>
-              </label>
-            ))}
-          </div>
+              </FormField>
+              <FormField label="Email">
+                <input
+                  required
+                  type="email"
+                  value={form.email}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, email: event.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Password">
+                <input
+                  required
+                  type="password"
+                  value={form.password}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, password: event.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Phone number">
+                <input
+                  value={form.phoneNumber}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, phoneNumber: event.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Initial role">
+                <select
+                  value={form.roleId}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, roleId: event.target.value }))
+                  }
+                >
+                  <option value="">No role</option>
+                  {roles.map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.name}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+            </div>
 
-          <button className="primary-button" disabled={busy === 'create'} type="submit">
-            {busy === 'create' ? 'Creating...' : 'Create user'}
-          </button>
-        </form>
+            <div className="pill-grid">
+              {branches.map((branch) => (
+                <label key={branch.id} className="toggle-pill">
+                  <input
+                    type="checkbox"
+                    checked={form.branchIds.includes(branch.id)}
+                    onChange={() =>
+                      setForm((current) => ({
+                        ...current,
+                        branchIds: toggleSelection(current.branchIds, branch.id),
+                      }))
+                    }
+                  />
+                  <span>{branch.name}</span>
+                </label>
+              ))}
+            </div>
+
+            <button className="primary-button" disabled={busy === 'create'} type="submit">
+              {busy === 'create' ? 'Creating...' : 'Create user'}
+            </button>
+          </form>
+        ) : null}
 
         <section className="content-card">
           <div className="section-heading">
@@ -2018,61 +2025,67 @@ function UsersPage({ api }) {
                       <strong>{user.fullName}</strong>
                       <span>{user.email}</span>
                     </div>
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      disabled={busy === user.id}
-                      onClick={() => saveAssignments(user.id)}
-                    >
-                      {busy === user.id ? 'Saving...' : 'Save'}
-                    </button>
+                    {canAssignRole ? (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={busy === user.id}
+                        onClick={() => saveAssignments(user.id)}
+                      >
+                        {busy === user.id ? 'Saving...' : 'Save'}
+                      </button>
+                    ) : null}
                   </div>
 
-                  <FormField label="Role">
-                    <select
-                      value={userDrafts[user.id]?.roleId ?? ''}
-                      onChange={(event) =>
-                        setUserDrafts((current) => ({
-                          ...current,
-                          [user.id]: {
-                            ...current[user.id],
-                            roleId: event.target.value,
-                          },
-                        }))
-                      }
-                    >
-                      <option value="">No role</option>
-                      {roles.map((role) => (
-                        <option key={role.id} value={role.id}>
-                          {role.name}
-                        </option>
-                      ))}
-                    </select>
-                  </FormField>
-
-                  <div className="pill-grid">
-                    {branches.map((branch) => (
-                      <label key={`${user.id}-${branch.id}`} className="toggle-pill">
-                        <input
-                          type="checkbox"
-                          checked={(userDrafts[user.id]?.branchIds ?? []).includes(branch.id)}
-                          onChange={() =>
+                  {canAssignRole ? (
+                    <>
+                      <FormField label="Role">
+                        <select
+                          value={userDrafts[user.id]?.roleId ?? ''}
+                          onChange={(event) =>
                             setUserDrafts((current) => ({
                               ...current,
                               [user.id]: {
                                 ...current[user.id],
-                                branchIds: toggleSelection(
-                                  current[user.id]?.branchIds ?? [],
-                                  branch.id,
-                                ),
+                                roleId: event.target.value,
                               },
                             }))
                           }
-                        />
-                        <span>{branch.name}</span>
-                      </label>
-                    ))}
-                  </div>
+                        >
+                          <option value="">No role</option>
+                          {roles.map((role) => (
+                            <option key={role.id} value={role.id}>
+                              {role.name}
+                            </option>
+                          ))}
+                        </select>
+                      </FormField>
+
+                      <div className="pill-grid">
+                        {branches.map((branch) => (
+                          <label key={`${user.id}-${branch.id}`} className="toggle-pill">
+                            <input
+                              type="checkbox"
+                              checked={(userDrafts[user.id]?.branchIds ?? []).includes(branch.id)}
+                              onChange={() =>
+                                setUserDrafts((current) => ({
+                                  ...current,
+                                  [user.id]: {
+                                    ...current[user.id],
+                                    branchIds: toggleSelection(
+                                      current[user.id]?.branchIds ?? [],
+                                      branch.id,
+                                    ),
+                                  },
+                                }))
+                              }
+                            />
+                            <span>{branch.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
                 </article>
               ))}
             </div>

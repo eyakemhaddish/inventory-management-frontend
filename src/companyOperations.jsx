@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { NavLink } from 'react-router-dom'
 import {
   canAccessCompanyPage,
+  hasAnyUserPermission,
   hasUserPermission,
   isCompanyAdminUser,
   PERMISSIONS,
@@ -35,6 +35,15 @@ const PAYMENT_METHODS = [
   'Bank Transfer',
   'Card',
   'Other',
+]
+
+const SALES_REPORT_PERMISSIONS = [
+  PERMISSIONS.reportViewSales,
+  PERMISSIONS.reportViewSalesToday,
+  PERMISSIONS.reportViewSalesYesterday,
+  PERMISSIONS.reportViewSalesWeek,
+  PERMISSIONS.reportViewSalesMonth,
+  PERMISSIONS.reportViewSalesYear,
 ]
 
 function formatCurrency(value) {
@@ -526,11 +535,6 @@ export function CompanyDashboardPage({ api, session }) {
   const branchScopeOptions = canViewAllBranchSales
     ? [{ id: ALL_BRANCHES_VALUE, name: 'All branches' }, ...snapshot.branches]
     : snapshot.branches
-  const canViewProductsPage = canAccessCompanyPage(session, 'products')
-  const canViewInventoryPage = canAccessCompanyPage(session, 'inventory')
-  const canViewTransfersPage = canAccessCompanyPage(session, 'transfers')
-  const canViewSalesPage = canAccessCompanyPage(session, 'sales')
-  const canViewReportsPage = canAccessCompanyPage(session, 'reports')
   const selectedSalesScopeName =
     salesOverview?.branchName ??
     branchScopeOptions.find((branch) => branch.id === selectedBranchId)?.name ??
@@ -548,12 +552,6 @@ export function CompanyDashboardPage({ api, session }) {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        eyebrow="Company workspace"
-        title="Operations overview"
-        description="Track inventory pressure, branch activity, and the sales windows each role is allowed to see."
-      />
-
       {message ? <InlineMessage text={message} tone="error" /> : null}
 
       <section className="stats-grid">
@@ -613,87 +611,47 @@ export function CompanyDashboardPage({ api, session }) {
         />
       </section>
 
-      <section className="split-grid">
-        <article className="content-card">
-          <div className="section-heading">
-            <h3>Immediate attention</h3>
-            <p>Low stock and pending transfers that need action.</p>
-          </div>
+      <section className="content-card">
+        <div className="section-heading">
+          <p className="eyebrow">Operations overview</p>
+          <h3>Immediate attention</h3>
+          <p>Low stock and pending transfers that need action.</p>
+        </div>
 
-          {loading || attentionLoading ? (
-            <EmptyCard text="Loading dashboard..." compact />
-          ) : !availability.lowStock && !availability.transfers ? (
-            <EmptyCard text="Inventory alerts are unavailable for this role." compact />
-          ) : (
-            <div className="stack-list">
-              <div className="mini-summary">
-                <strong>{availability.lowStock ? snapshot.lowStock.length : 'Restricted'}</strong>
-                <span>
-                  {availability.lowStock
-                    ? 'Variants at or below reorder point'
-                    : 'Low stock alerts require stock access'}
-                </span>
-              </div>
-              <div className="mini-summary">
-                <strong>{availability.transfers ? snapshot.transfers.length : 'Restricted'}</strong>
-                <span>
-                  {availability.transfers
-                    ? 'Pending transfer requests'
-                    : 'Pending transfers require stock access'}
-                </span>
-              </div>
-              {availability.lowStock
-                ? snapshot.lowStock.slice(0, 4).map((item) => (
-                    <article key={item.productVariantId} className="list-card compact-card">
-                      <strong>{item.productName}</strong>
-                      <span>
-                        {item.variantDescription} | {item.currentQuantity} {item.unitOfMeasure}
-                      </span>
-                    </article>
-                  ))
-                : null}
+        {loading || attentionLoading ? (
+          <EmptyCard text="Loading dashboard..." compact />
+        ) : !availability.lowStock && !availability.transfers ? (
+          <EmptyCard text="Inventory alerts are unavailable for this role." compact />
+        ) : (
+          <div className="stack-list">
+            <div className="mini-summary">
+              <strong>{availability.lowStock ? snapshot.lowStock.length : 'Restricted'}</strong>
+              <span>
+                {availability.lowStock
+                  ? 'Variants at or below reorder point'
+                  : 'Low stock alerts require stock access'}
+              </span>
             </div>
-          )}
-        </article>
-
-        <article className="content-card">
-          <div className="section-heading">
-            <h3>Quick links</h3>
-            <p>Jump into the operational pages.</p>
+            <div className="mini-summary">
+              <strong>{availability.transfers ? snapshot.transfers.length : 'Restricted'}</strong>
+              <span>
+                {availability.transfers
+                  ? 'Pending transfer requests'
+                  : 'Pending transfers require stock access'}
+              </span>
+            </div>
+            {availability.lowStock
+              ? snapshot.lowStock.slice(0, 4).map((item) => (
+                  <article key={item.productVariantId} className="list-card compact-card">
+                    <strong>{item.productName}</strong>
+                    <span>
+                      {item.variantDescription} | {item.currentQuantity} {item.unitOfMeasure}
+                    </span>
+                  </article>
+                ))
+              : null}
           </div>
-          <div className="quick-links">
-            {canViewProductsPage ? (
-              <NavLink to="/app/company/products" className="quick-link-card">
-                <strong>Products</strong>
-                <span>Create products and variants</span>
-              </NavLink>
-            ) : null}
-            {canViewInventoryPage ? (
-              <NavLink to="/app/company/inventory" className="quick-link-card">
-                <strong>Inventory</strong>
-                <span>Adjust stock and review balances</span>
-              </NavLink>
-            ) : null}
-            {canViewTransfersPage ? (
-              <NavLink to="/app/company/transfers" className="quick-link-card">
-                <strong>Transfers</strong>
-                <span>Approve, ship, and receive stock</span>
-              </NavLink>
-            ) : null}
-            {canViewSalesPage ? (
-              <NavLink to="/app/company/sales" className="quick-link-card">
-                <strong>Sales</strong>
-                <span>Log POS sales and handle returns</span>
-              </NavLink>
-            ) : null}
-            {canViewReportsPage ? (
-              <NavLink to="/app/company/reports" className="quick-link-card">
-                <strong>Reports</strong>
-                <span>View summaries and export data</span>
-              </NavLink>
-            ) : null}
-          </div>
-        </article>
+        )}
       </section>
 
       <section className="content-card sales-analytics-shell">
@@ -822,34 +780,93 @@ export function CompanyDashboardPage({ api, session }) {
 }
 
 function SalesTrendChart({ points }) {
+  if (points.length === 0) {
+    return (
+      <div className="sales-chart">
+        <div className="section-heading">
+          <h3>Sales graph</h3>
+          <p>Line graph of branch sales for the active reporting window.</p>
+        </div>
+
+        <EmptyCard text="No sales activity in this window yet." compact />
+      </div>
+    )
+  }
+
+  const chartHeight = 148
+  const plotTop = 14
+  const plotBottom = 86
+  const labelY = 110
+  const valueY = 126
+  const columnCount = Math.max(points.length, 1)
+  const chartWidth = Math.max(columnCount * 72, 240)
+  const slotWidth = chartWidth / columnCount
+  const plotHeight = plotBottom - plotTop
   const highestSalesValue = Math.max(...points.map((point) => Number(point.salesValue)), 0)
+  const chartPoints = points.map((point, index) => {
+    const salesValue = Number(point.salesValue)
+    const ratio = highestSalesValue === 0 ? 0.5 : salesValue / highestSalesValue
+
+    return {
+      ...point,
+      salesValue,
+      x: slotWidth * index + slotWidth / 2,
+      y: plotBottom - ratio * plotHeight,
+    }
+  })
+  const linePath = chartPoints
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
+    .join(' ')
+  const lastChartPoint = chartPoints[chartPoints.length - 1]
+  const areaPath =
+    chartPoints.length > 1
+      ? `${linePath} L ${lastChartPoint.x} ${plotBottom} L ${chartPoints[0].x} ${plotBottom} Z`
+      : ''
+  const guideLinePositions = [plotTop, plotTop + plotHeight / 2, plotBottom]
 
   return (
     <div className="sales-chart">
       <div className="section-heading">
         <h3>Sales graph</h3>
-        <p>Bar graph of branch sales for the active reporting window.</p>
+        <p>Simple line view of branch sales for the active reporting window.</p>
       </div>
 
       <div className="sales-chart-scroll">
-        <div className="sales-chart-grid">
-          {points.map((point) => {
-            const height =
-              highestSalesValue === 0 ? 0 : (Number(point.salesValue) / highestSalesValue) * 100
-            const visibleHeight = height === 0 ? 0 : Math.max(height, 10)
+        <div className="sales-chart-canvas" style={{ minWidth: `${chartWidth}px` }}>
+          <svg
+            className="sales-chart-svg"
+            viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+            role="img"
+            aria-label="Line chart showing branch sales across the active reporting window"
+          >
+            {guideLinePositions.map((position) => (
+              <line
+                key={position}
+                className="sales-chart-guide"
+                x1="0"
+                x2={chartWidth}
+                y1={position}
+                y2={position}
+              />
+            ))}
 
-            return (
-              <div key={`${point.bucketStartUtc}-${point.label}`} className="sales-chart-bar">
-                <div className="sales-chart-track">
-                  <div className="sales-chart-fill" style={{ height: `${visibleHeight}%` }} />
-                </div>
-                <div className="sales-chart-meta">
-                  <strong>{point.label}</strong>
-                  <span>{formatCurrency(point.salesValue)}</span>
-                </div>
-              </div>
-            )
-          })}
+            {areaPath ? <path className="sales-chart-area" d={areaPath} /> : null}
+            {chartPoints.length > 1 ? <path className="sales-chart-line" d={linePath} /> : null}
+
+            {chartPoints.map((point) => (
+              <g key={`${point.bucketStartUtc}-${point.label}`}>
+                <title>{`${point.label}: ${formatCurrency(point.salesValue)}`}</title>
+                <circle className="sales-chart-point" cx={point.x} cy={point.y} r="5" />
+                <circle className="sales-chart-point-core" cx={point.x} cy={point.y} r="2.4" />
+                <text className="sales-chart-label" x={point.x} y={labelY} textAnchor="middle">
+                  {point.label}
+                </text>
+                <text className="sales-chart-value" x={point.x} y={valueY} textAnchor="middle">
+                  {formatCurrency(point.salesValue)}
+                </text>
+              </g>
+            ))}
+          </svg>
         </div>
       </div>
     </div>
@@ -901,7 +918,7 @@ function TopProductsList({ items }) {
   )
 }
 
-export function ProductsPage({ api }) {
+export function ProductsPage({ api, session }) {
   const [branches, setBranches] = useState([])
   const [selectedBranchId, setSelectedBranchId] = useState('')
   const [products, setProducts] = useState([])
@@ -920,6 +937,9 @@ export function ProductsPage({ api }) {
   const [variants, setVariants] = useState([{ ...EMPTY_VARIANT }])
   const selectedBranchName =
     branches.find((branch) => branch.id === selectedBranchId)?.name ?? 'the selected branch'
+  const canCreateProduct = hasUserPermission(session, PERMISSIONS.productCreate)
+  const canImportProducts = hasUserPermission(session, PERMISSIONS.productImport)
+  const canExportProducts = hasUserPermission(session, PERMISSIONS.productExport)
 
   const loadProducts = useCallback(async (branchId) => {
     if (!branchId) {
@@ -1130,15 +1150,21 @@ export function ProductsPage({ api }) {
         title="Products and variants"
         description="Create generic products with flexible variants for shoes, electronics, groceries, or any other stock type."
         action={
-          <div className="hero-actions">
-            <label className="ghost-button file-picker">
-              {importing ? 'Importing...' : 'Import CSV'}
-              <input type="file" accept=".csv" disabled={importing} onChange={importProducts} />
-            </label>
-            <button type="button" className="ghost-button" onClick={exportProducts}>
-              Export CSV
-            </button>
-          </div>
+          canImportProducts || canExportProducts ? (
+            <div className="hero-actions">
+              {canImportProducts ? (
+                <label className="ghost-button file-picker">
+                  {importing ? 'Importing...' : 'Import CSV'}
+                  <input type="file" accept=".csv" disabled={importing} onChange={importProducts} />
+                </label>
+              ) : null}
+              {canExportProducts ? (
+                <button type="button" className="ghost-button" onClick={exportProducts}>
+                  Export CSV
+                </button>
+              ) : null}
+            </div>
+          ) : null
         }
       />
 
@@ -1150,94 +1176,96 @@ export function ProductsPage({ api }) {
       ) : null}
 
       <section className="split-grid">
-        <form className="content-card stack-form" onSubmit={handleSubmit}>
-          <div className="section-heading">
-            <h3>Create product</h3>
-            <p>Add a product with one or more sellable variants.</p>
-          </div>
+        {canCreateProduct ? (
+          <form className="content-card stack-form" onSubmit={handleSubmit}>
+            <div className="section-heading">
+              <h3>Create product</h3>
+              <p>Add a product with one or more sellable variants.</p>
+            </div>
 
-          <div className="input-grid">
-            <FormField label="Product code">
-              <input required value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} />
-            </FormField>
-            <FormField label="Product name">
-              <input required value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
-            </FormField>
-            <FormField label="Category">
-              <input required value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))} />
-            </FormField>
-            <FormField label="Unit of measure">
-              <input required value={form.unitOfMeasure} onChange={(event) => setForm((current) => ({ ...current, unitOfMeasure: event.target.value }))} />
-            </FormField>
-            <FormField label="Reorder point">
-              <input type="number" min="0" value={form.reorderPoint} onChange={(event) => setForm((current) => ({ ...current, reorderPoint: event.target.value }))} />
-            </FormField>
-            <FormField label="Description">
-              <input value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
-            </FormField>
-          </div>
+            <div className="input-grid">
+              <FormField label="Product code">
+                <input required value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} />
+              </FormField>
+              <FormField label="Product name">
+                <input required value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
+              </FormField>
+              <FormField label="Category">
+                <input required value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))} />
+              </FormField>
+              <FormField label="Unit of measure">
+                <input required value={form.unitOfMeasure} onChange={(event) => setForm((current) => ({ ...current, unitOfMeasure: event.target.value }))} />
+              </FormField>
+              <FormField label="Reorder point">
+                <input type="number" min="0" value={form.reorderPoint} onChange={(event) => setForm((current) => ({ ...current, reorderPoint: event.target.value }))} />
+              </FormField>
+              <FormField label="Description">
+                <input value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
+              </FormField>
+            </div>
 
-          <div className="section-heading">
-            <h3>Variants</h3>
-            <p>Capture size, color, flavor, model, or your own custom attributes.</p>
-          </div>
+            <div className="section-heading">
+              <h3>Variants</h3>
+              <p>Capture size, color, flavor, model, or your own custom attributes.</p>
+            </div>
 
-          <div className="editor-stack">
-            {variants.map((variant, index) => (
-              <article key={`variant-${index}`} className="editor-card">
-                <div className="list-card-header">
-                  <strong>Variant {index + 1}</strong>
-                  {variants.length > 1 ? (
-                    <button type="button" className="ghost-button danger" onClick={() => setVariants((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
-                      Remove
-                    </button>
-                  ) : null}
-                </div>
+            <div className="editor-stack">
+              {variants.map((variant, index) => (
+                <article key={`variant-${index}`} className="editor-card">
+                  <div className="list-card-header">
+                    <strong>Variant {index + 1}</strong>
+                    {variants.length > 1 ? (
+                      <button type="button" className="ghost-button danger" onClick={() => setVariants((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
 
-                <div className="input-grid">
-                  {Object.entries({
-                    sku: 'SKU',
-                    sellingPrice: 'Selling price',
-                    openingQuantity: 'Opening quantity',
-                    barcode: 'Barcode',
-                    size: 'Size',
-                    color: 'Color',
-                    flavor: 'Flavor',
-                    model: 'Model',
-                    attribute1: 'Attribute 1',
-                    attribute2: 'Attribute 2',
-                  }).map(([key, label]) => (
-                    <FormField key={key} label={label}>
-                      <input
-                        required={key === 'sku' || key === 'sellingPrice'}
-                        type={key === 'sellingPrice' || key === 'openingQuantity' ? 'number' : 'text'}
-                        min={key === 'sellingPrice' || key === 'openingQuantity' ? '0' : undefined}
-                        step={key === 'sellingPrice' ? '0.01' : undefined}
-                        value={variant[key]}
-                        onChange={(event) =>
-                          setVariants((current) =>
-                            current.map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, [key]: event.target.value } : item,
-                            ),
-                          )
-                        }
-                      />
-                    </FormField>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
+                  <div className="input-grid">
+                    {Object.entries({
+                      sku: 'SKU',
+                      sellingPrice: 'Selling price',
+                      openingQuantity: 'Opening quantity',
+                      barcode: 'Barcode',
+                      size: 'Size',
+                      color: 'Color',
+                      flavor: 'Flavor',
+                      model: 'Model',
+                      attribute1: 'Attribute 1',
+                      attribute2: 'Attribute 2',
+                    }).map(([key, label]) => (
+                      <FormField key={key} label={label}>
+                        <input
+                          required={key === 'sku' || key === 'sellingPrice'}
+                          type={key === 'sellingPrice' || key === 'openingQuantity' ? 'number' : 'text'}
+                          min={key === 'sellingPrice' || key === 'openingQuantity' ? '0' : undefined}
+                          step={key === 'sellingPrice' ? '0.01' : undefined}
+                          value={variant[key]}
+                          onChange={(event) =>
+                            setVariants((current) =>
+                              current.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, [key]: event.target.value } : item,
+                              ),
+                            )
+                          }
+                        />
+                      </FormField>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
 
-          <div className="page-actions">
-            <button type="button" className="ghost-button" onClick={() => setVariants((current) => [...current, { ...EMPTY_VARIANT }])}>
-              Add variant
-            </button>
-            <button className="primary-button" disabled={busy} type="submit">
-              {busy ? 'Saving...' : 'Create product'}
-            </button>
-          </div>
-        </form>
+            <div className="page-actions">
+              <button type="button" className="ghost-button" onClick={() => setVariants((current) => [...current, { ...EMPTY_VARIANT }])}>
+                Add variant
+              </button>
+              <button className="primary-button" disabled={busy} type="submit">
+                {busy ? 'Saving...' : 'Create product'}
+              </button>
+            </div>
+          </form>
+        ) : null}
 
         <section className="content-card">
           <div className="section-heading">
@@ -1327,6 +1355,7 @@ export function InventoryPage({ api, session }) {
 
   const variants = normalizeProductVariants(products)
   const isCompanyAdmin = isCompanyAdminUser(session)
+  const canAdjustInventory = hasUserPermission(session, PERMISSIONS.stockAdjust)
   const selectedBranchName =
     branches.find((branch) => branch.id === selectedBranchId)?.name ?? 'the selected branch'
 
@@ -1459,46 +1488,48 @@ export function InventoryPage({ api, session }) {
       ) : null}
 
       <section className="split-grid">
-        <form className="content-card stack-form" onSubmit={submitAdjustment}>
-          <div className="section-heading">
-            <h3>Inventory adjustment</h3>
-            <p>Positive values add stock. Negative values remove stock.</p>
-          </div>
+        {canAdjustInventory ? (
+          <form className="content-card stack-form" onSubmit={submitAdjustment}>
+            <div className="section-heading">
+              <h3>Inventory adjustment</h3>
+              <p>Positive values add stock. Negative values remove stock.</p>
+            </div>
 
-          <FormField label="Variant">
-            <select required value={adjustment.productVariantId} onChange={(event) => setAdjustment((current) => ({ ...current, productVariantId: event.target.value }))}>
-              <option value="">Select a variant</option>
-              {variants.map((variant) => (
-                <option key={variant.id} value={variant.id}>
-                  {buildVariantLabel(variant)}
-                </option>
-              ))}
-            </select>
-          </FormField>
+            <FormField label="Variant">
+              <select required value={adjustment.productVariantId} onChange={(event) => setAdjustment((current) => ({ ...current, productVariantId: event.target.value }))}>
+                <option value="">Select a variant</option>
+                {variants.map((variant) => (
+                  <option key={variant.id} value={variant.id}>
+                    {buildVariantLabel(variant)}
+                  </option>
+                ))}
+              </select>
+            </FormField>
 
-          <FormField label="Location">
-            <select value={adjustment.branchId} onChange={(event) => setAdjustment((current) => ({ ...current, branchId: event.target.value }))}>
-              {isCompanyAdmin ? <option value="">Central store</option> : null}
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </select>
-          </FormField>
+            <FormField label="Location">
+              <select value={adjustment.branchId} onChange={(event) => setAdjustment((current) => ({ ...current, branchId: event.target.value }))}>
+                {isCompanyAdmin ? <option value="">Central store</option> : null}
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+            </FormField>
 
-          <FormField label="Quantity change">
-            <input required type="number" value={adjustment.quantityChange} onChange={(event) => setAdjustment((current) => ({ ...current, quantityChange: event.target.value }))} />
-          </FormField>
+            <FormField label="Quantity change">
+              <input required type="number" value={adjustment.quantityChange} onChange={(event) => setAdjustment((current) => ({ ...current, quantityChange: event.target.value }))} />
+            </FormField>
 
-          <FormField label="Reason">
-            <textarea required rows="4" value={adjustment.reason} onChange={(event) => setAdjustment((current) => ({ ...current, reason: event.target.value }))} />
-          </FormField>
+            <FormField label="Reason">
+              <textarea required rows="4" value={adjustment.reason} onChange={(event) => setAdjustment((current) => ({ ...current, reason: event.target.value }))} />
+            </FormField>
 
-          <button className="primary-button" disabled={busy} type="submit">
-            {busy ? 'Saving...' : 'Save adjustment'}
-          </button>
-        </form>
+            <button className="primary-button" disabled={busy} type="submit">
+              {busy ? 'Saving...' : 'Save adjustment'}
+            </button>
+          </form>
+        ) : null}
 
         <section className="content-card">
           <div className="section-heading">
@@ -1941,6 +1972,8 @@ export function SalesPage({ api, session }) {
     : hasAssignedBranchIds
       ? branches.filter((branch) => assignedBranchIds.includes(branch.id))
       : branches
+  const canCreateSale = hasUserPermission(session, PERMISSIONS.saleCreate)
+  const canProcessReturn = hasUserPermission(session, PERMISSIONS.saleReturn)
   const variants = normalizeProductVariants(products)
   const emptyReturnForm = { saleId: '', saleLineId: '', quantity: 1, restock: true, reason: '' }
   const selectedSale = sales.find((sale) => sale.id === returnForm.saleId)
@@ -2108,8 +2141,10 @@ export function SalesPage({ api, session }) {
         </FormField>
       </section>
 
-      <section className="split-grid">
-        <form className="content-card stack-form" onSubmit={logSale}>
+      {canCreateSale || canProcessReturn ? (
+        <section className="split-grid">
+          {canCreateSale ? (
+            <form className="content-card stack-form" onSubmit={logSale}>
           <div className="section-heading">
             <h3>Log sale</h3>
             <p>Create an invoice and deduct stock from the selected branch.</p>
@@ -2198,9 +2233,11 @@ export function SalesPage({ api, session }) {
               {busy === 'sale' ? 'Saving...' : 'Log sale'}
             </button>
           </div>
-        </form>
+            </form>
+          ) : null}
 
-        <form className="content-card stack-form" onSubmit={submitReturn}>
+          {canProcessReturn ? (
+            <form className="content-card stack-form" onSubmit={submitReturn}>
           <div className="section-heading">
             <h3>Process return</h3>
             <p>Select a recorded sale line and return quantity.</p>
@@ -2253,8 +2290,10 @@ export function SalesPage({ api, session }) {
           <button className="primary-button" disabled={!selectedBranchId || busy === 'return'} type="submit">
             {busy === 'return' ? 'Saving...' : 'Process return'}
           </button>
-        </form>
-      </section>
+            </form>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="split-grid">
         <section className="content-card">
@@ -2319,11 +2358,13 @@ export function SalesPage({ api, session }) {
   )
 }
 
-export function ReportsPage({ api }) {
+export function ReportsPage({ api, session }) {
   const [stockSummary, setStockSummary] = useState([])
   const [salesByBranch, setSalesByBranch] = useState([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const canViewInventoryReport = hasUserPermission(session, PERMISSIONS.reportViewInventory)
+  const canViewSalesReport = hasAnyUserPermission(session, SALES_REPORT_PERMISSIONS)
 
   useEffect(() => {
     let active = true
@@ -2334,8 +2375,8 @@ export function ReportsPage({ api }) {
 
       try {
         const [stockResult, salesResult] = await Promise.all([
-          api.get('/reports/stock-summary'),
-          api.get('/reports/sales-by-branch'),
+          canViewInventoryReport ? api.get('/reports/stock-summary') : Promise.resolve([]),
+          canViewSalesReport ? api.get('/reports/sales-by-branch') : Promise.resolve([]),
         ])
 
         if (!active) {
@@ -2359,7 +2400,7 @@ export function ReportsPage({ api }) {
     return () => {
       active = false
     }
-  }, [api])
+  }, [api, canViewInventoryReport, canViewSalesReport])
 
   function exportStockSummary() {
     exportCsv(
@@ -2387,30 +2428,36 @@ export function ReportsPage({ api }) {
         title="Operational summaries"
         description="Review stock summary and branch sales performance, then export inventory data for spreadsheet workflows."
         action={
-          <button type="button" className="ghost-button" onClick={exportStockSummary}>
-            Export stock CSV
-          </button>
+          canViewInventoryReport ? (
+            <button type="button" className="ghost-button" onClick={exportStockSummary}>
+              Export stock CSV
+            </button>
+          ) : null
         }
       />
 
       {message ? <InlineMessage text={message} tone="error" /> : null}
 
       <section className="split-grid">
-        <section className="content-card">
-          <div className="section-heading">
-            <h3>Stock summary</h3>
-            <p>{loading ? 'Loading stock summary...' : `${stockSummary.length} tracked variants`}</p>
-          </div>
-          {loading ? <EmptyCard text="Loading stock summary..." compact /> : stockSummary.length === 0 ? <EmptyCard text="No stock summary available." compact /> : <InventoryReportList items={stockSummary} />}
-        </section>
+        {canViewInventoryReport ? (
+          <section className="content-card">
+            <div className="section-heading">
+              <h3>Stock summary</h3>
+              <p>{loading ? 'Loading stock summary...' : `${stockSummary.length} tracked variants`}</p>
+            </div>
+            {loading ? <EmptyCard text="Loading stock summary..." compact /> : stockSummary.length === 0 ? <EmptyCard text="No stock summary available." compact /> : <InventoryReportList items={stockSummary} />}
+          </section>
+        ) : null}
 
-        <section className="content-card">
-          <div className="section-heading">
-            <h3>Sales by branch</h3>
-            <p>{loading ? 'Loading branch sales...' : `${salesByBranch.length} branches with sales`}</p>
-          </div>
-          {loading ? <EmptyCard text="Loading sales by branch..." compact /> : salesByBranch.length === 0 ? <EmptyCard text="No sales data yet." compact /> : <BranchSalesList items={salesByBranch} />}
-        </section>
+        {canViewSalesReport ? (
+          <section className="content-card">
+            <div className="section-heading">
+              <h3>Sales by branch</h3>
+              <p>{loading ? 'Loading branch sales...' : `${salesByBranch.length} branches with sales`}</p>
+            </div>
+            {loading ? <EmptyCard text="Loading sales by branch..." compact /> : salesByBranch.length === 0 ? <EmptyCard text="No sales data yet." compact /> : <BranchSalesList items={salesByBranch} />}
+          </section>
+        ) : null}
       </section>
     </div>
   )

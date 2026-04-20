@@ -259,7 +259,6 @@
 .stat-card span,
 .form-field small,
 .summary-block span,
-.quick-link-card span,
 .hero-list span,
 .step-list p,
 .role-library-card-top span,
@@ -397,7 +396,6 @@
 .ghost-button:hover,
 .primary-link:hover,
 .secondary-link:hover,
-.quick-link-card:hover,
 .role-toggle-card:hover,
 .role-library-card:hover {
   transform: translateY(-2px);
@@ -619,30 +617,6 @@
   gap: 14px;
 }
 
-.quick-links {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 16px;
-}
-
-.quick-link-card {
-  display: grid;
-  gap: 8px;
-  min-height: 148px;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 22px;
-  background: linear-gradient(155deg, var(--surface-strong), var(--surface-muted));
-  color: inherit;
-  text-decoration: none;
-  box-shadow: inset 0 1px 0 var(--surface-gloss);
-}
-
-.quick-link-card strong {
-  font-family: 'Space Grotesk', 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
-  font-size: 1.02rem;
-}
-
 .sales-analytics-shell,
 .sales-breakdown-card,
 .sales-window-card,
@@ -682,8 +656,7 @@
 }
 
 .sales-window-grid,
-.sales-metric-strip,
-.sales-chart-grid {
+.sales-metric-strip {
   display: grid;
   gap: 16px;
 }
@@ -732,7 +705,6 @@
 .sales-window-card-top span,
 .sales-spotlight-copy p,
 .sales-spotlight-total span,
-.sales-chart-meta span,
 .sales-breakdown-row span,
 .sales-product-row span,
 .sales-metric-card span {
@@ -782,55 +754,73 @@
 
 .sales-chart {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .sales-chart-scroll {
   overflow-x: auto;
-  padding-bottom: 6px;
+  padding-bottom: 4px;
 }
 
-.sales-chart-grid {
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(96px, 1fr);
-  align-items: end;
-  min-width: 100%;
+.sales-chart-canvas {
+  width: 100%;
 }
 
-.sales-chart-bar {
-  display: grid;
-  gap: 10px;
-}
-
-.sales-chart-track {
-  height: 190px;
-  display: flex;
-  align-items: end;
-  border-radius: 22px;
+.sales-chart-svg {
+  display: block;
+  width: 100%;
+  height: 148px;
+  border-radius: 20px;
   border: 1px solid var(--border-soft);
   background:
-    linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(217, 119, 69, 0.08)),
+    linear-gradient(180deg, rgba(15, 118, 110, 0.03), rgba(217, 119, 69, 0.06)),
     var(--surface);
-  overflow: hidden;
+  box-shadow: inset 0 1px 0 var(--surface-gloss);
 }
 
-.sales-chart-fill {
-  width: 100%;
-  min-height: 0;
-  border-radius: 16px 16px 6px 6px;
-  background: linear-gradient(180deg, var(--accent-2), var(--accent));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+.sales-chart-guide {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 4 6;
 }
 
-.sales-chart-meta {
-  display: grid;
-  gap: 4px;
-  text-align: center;
+.sales-chart-area {
+  fill: var(--accent-soft);
 }
 
-.sales-chart-meta strong {
-  font-size: 0.82rem;
-  line-height: 1.25;
+.sales-chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sales-chart-point {
+  fill: var(--surface-strong);
+  stroke: var(--accent-2);
+  stroke-width: 2.5;
+}
+
+.sales-chart-point-core {
+  fill: var(--accent);
+}
+
+.sales-chart-label,
+.sales-chart-value {
+  font-family: 'Manrope', 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+  font-weight: 700;
+}
+
+.sales-chart-label {
+  fill: var(--text-strong);
+  font-size: 9.6px;
+}
+
+.sales-chart-value {
+  fill: var(--text-muted);
+  font-size: 8.4px;
+  font-weight: 600;
 }
 
 .sales-breakdown-row,
@@ -1593,10 +1583,6 @@ textarea:focus {
   color: #c6f5d9;
 }
 
-[data-theme='dark'] .sales-chart-fill {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
 @media (max-width: 1280px) {
   .workspace-shell {
     grid-template-columns: 276px minmax(0, 1fr);
@@ -1711,8 +1697,8 @@ textarea:focus {
     min-width: 100%;
   }
 
-  .sales-chart-grid {
-    grid-auto-columns: minmax(84px, 1fr);
+  .sales-chart-svg {
+    height: 140px;
   }
 
   .public-nav,
