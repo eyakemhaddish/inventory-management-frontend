@@ -15,6 +15,7 @@ export const PERMISSIONS = {
   userCreate: 'user.create',
   userAssignRole: 'user.assign_role',
   reportViewSales: 'report.view_sales',
+  reportViewSalesAllBranches: 'report.view_sales_all_branches',
   reportViewInventory: 'report.view_inventory',
 }
 

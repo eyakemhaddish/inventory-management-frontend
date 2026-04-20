@@ -261,7 +261,10 @@ export function CompanyDashboardPage({ api, session }) {
   const [todaySalesWindow, setTodaySalesWindow] = useState(null)
   const [salesMessage, setSalesMessage] = useState('')
   const [activeSalesWindowKey, setActiveSalesWindowKey] = useState('')
-  const isCompanyAdmin = isCompanyAdminUser(session)
+  const canViewAllBranchSales = hasUserPermission(
+    session,
+    PERMISSIONS.reportViewSalesAllBranches,
+  )
 
   useEffect(() => {
     let active = true
@@ -321,15 +324,15 @@ export function CompanyDashboardPage({ api, session }) {
 
   useEffect(() => {
     setSelectedBranchId((current) =>
-      current === ALL_BRANCHES_VALUE && isCompanyAdmin
+      current === ALL_BRANCHES_VALUE && canViewAllBranchSales
         ? current
         : snapshot.branches.some((branch) => branch.id === current)
           ? current
-          : isCompanyAdmin && snapshot.branches.length > 0
+          : canViewAllBranchSales && snapshot.branches.length > 0
             ? ALL_BRANCHES_VALUE
             : snapshot.branches[0]?.id ?? '',
     )
-  }, [isCompanyAdmin, snapshot.branches])
+  }, [canViewAllBranchSales, snapshot.branches])
 
   useEffect(() => {
     let active = true
@@ -520,7 +523,7 @@ export function CompanyDashboardPage({ api, session }) {
   }, [activeSalesWindowKey, api, salesOverview, selectedBranchId])
 
   const totalUnits = snapshot.stockSummary.reduce((sum, item) => sum + item.totalQuantity, 0)
-  const branchScopeOptions = isCompanyAdmin
+  const branchScopeOptions = canViewAllBranchSales
     ? [{ id: ALL_BRANCHES_VALUE, name: 'All branches' }, ...snapshot.branches]
     : snapshot.branches
   const canViewProductsPage = canAccessCompanyPage(session, 'products')
@@ -705,7 +708,7 @@ export function CompanyDashboardPage({ api, session }) {
 
           {snapshot.branches.length > 0 ? (
             <div className="sales-filter-controls">
-              <FormField label={isCompanyAdmin ? 'Branch scope' : 'Branch'}>
+              <FormField label={canViewAllBranchSales ? 'Branch scope' : 'Branch'}>
                 <select
                   value={selectedBranchId}
                   onChange={(event) => setSelectedBranchId(event.target.value)}

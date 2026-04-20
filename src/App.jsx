@@ -28,6 +28,7 @@ import './App.css'
 
 const SESSION_STORAGE_KEY = 'ims.session'
 const REGISTRATION_STORAGE_KEY = 'ims.companyRegistration'
+const THEME_STORAGE_KEY = 'ims.theme'
 const SUBDOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])$/
 const DEFAULT_ROLE_TEMPLATES = [
   {
@@ -214,6 +215,15 @@ function readStorage(key) {
   }
 }
 
+function readThemePreference() {
+  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
+  if (storedTheme === 'dark' || storedTheme === 'light') {
+    return storedTheme
+  }
+
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
 function writeStorage(key, value) {
   if (!value) {
     window.localStorage.removeItem(key)
@@ -260,7 +270,13 @@ function App() {
   const [registration, setRegistration] = useState(() =>
     readStorage(REGISTRATION_STORAGE_KEY),
   )
+  const [theme, setTheme] = useState(() => readThemePreference())
   const api = useStableApi(setSession)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme)
+  }, [theme])
 
   function saveRegistration(nextRegistration) {
     writeStorage(REGISTRATION_STORAGE_KEY, nextRegistration)
@@ -275,6 +291,10 @@ function App() {
   function saveSession(nextSession) {
     writeStorage(SESSION_STORAGE_KEY, nextSession)
     setSession(nextSession)
+  }
+
+  function toggleTheme() {
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
   }
 
   function renderCompanyPage(pageKey, element) {
@@ -301,7 +321,7 @@ function App() {
                 replace
               />
             ) : (
-              <PublicLayout />
+              <PublicLayout theme={theme} toggleTheme={toggleTheme} />
             )
           }
         >
@@ -323,7 +343,12 @@ function App() {
           path="/app"
           element={
             session ? (
-              <AppLayout clearSession={clearSession} session={session} />
+              <AppLayout
+                clearSession={clearSession}
+                session={session}
+                theme={theme}
+                toggleTheme={toggleTheme}
+              />
             ) : (
               <Navigate to="/login" replace />
             )
@@ -421,7 +446,25 @@ function App() {
   )
 }
 
-function PublicLayout() {
+function ThemeToggle({ theme, toggleTheme }) {
+  const isDark = theme === 'dark'
+
+  return (
+    <button
+      type="button"
+      className={isDark ? 'theme-toggle theme-toggle-dark' : 'theme-toggle'}
+      aria-pressed={isDark}
+      aria-label={isDark ? 'Switch to day mode' : 'Switch to night mode'}
+      onClick={toggleTheme}
+    >
+      <span className="theme-toggle-track" aria-hidden="true">
+        <span className={isDark ? 'theme-toggle-thumb theme-toggle-thumb-dark' : 'theme-toggle-thumb'} />
+      </span>
+    </button>
+  )
+}
+
+function PublicLayout({ theme, toggleTheme }) {
   return (
     <div className="public-shell">
       <header className="public-header">
@@ -436,6 +479,7 @@ function PublicLayout() {
           <SimpleNavLink to="/">Overview</SimpleNavLink>
           <SimpleNavLink to="/register">Register</SimpleNavLink>
           <SimpleNavLink to="/login">Login</SimpleNavLink>
+          <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
         </nav>
       </header>
       <main className="public-main">
@@ -734,7 +778,7 @@ function LoginPage({ api, saveSession }) {
   )
 }
 
-function AppLayout({ clearSession, session }) {
+function AppLayout({ clearSession, session, theme, toggleTheme }) {
   const primaryLinks = session.user.isSuperAdmin
     ? [{ to: '/app/platform/companies', label: 'Companies' }]
     : [
@@ -790,6 +834,7 @@ function AppLayout({ clearSession, session }) {
             <p>{session.user.email}</p>
           </div>
           <div className="topbar-summary">
+            <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
             <span className="status-pill subtle">{session.user.companyName}</span>
             {session.user.isSuperAdmin ? <span className="status-pill success">Superadmin</span> : null}
           </div>
